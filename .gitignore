@@ -1,0 +1,34 @@
+# --- Python ---
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- Node / Vue ---
+web/node_modules/
+web/dist/
+npm-debug.log*
+
+# --- Generated data (re-created by the pipeline at runtime) ---
+data/
+
+# --- Source documents (third-party PDFs; add your own) ---
+Documents/*.pdf
+!Documents/.gitkeep
+
+# --- DeepEval cache / temp test data (can contain document quotes) ---
+.deepeval/
+.deepeval-cache.json
+.temp_test_run_data.json
+temp_test_run_data.json
+
+# --- Claude Code harness internals ---
+.claude/
+
+# --- OS / editor ---
+.DS_Store
+*.log
+.idea/
+.vscode/

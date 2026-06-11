@@ -1,0 +1,21 @@
+# Core API + RAG
+fastapi
+uvicorn[standard]
+pydantic>=2
+python-multipart
+httpx
+requests
+numpy
+tqdm
+# PDF parsing
+pymupdf
+# Retrieval utilities
+scikit-learn
+rank-bm25
+networkx
+# Reranker (cross-encoder) + embeddings fallback
+torch
+transformers
+sentence-transformers
+# Evaluation
+deepeval
