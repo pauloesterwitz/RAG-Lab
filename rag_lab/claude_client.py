@@ -160,8 +160,28 @@ def generate(
     temp = SETTINGS.gen_temperature if temperature is None else temperature
     tok = max_tokens or num_predict or SETTINGS.gen_num_predict
 
-    _get_limiter(mdl).acquire()  # respect per-model RPM ceiling
+    for _attempt in range(5):
+        _get_limiter(mdl).acquire()  # respect per-model RPM ceiling
+        try:
+            return _generate_once(
+                mdl, temp, tok, prompt, system=system, fmt=fmt,
+            )
+        except anthropic.RateLimitError:
+            wait = 20.0 * (2 ** _attempt)
+            print(f"[claude] 429 rate limit on {mdl}; sleeping {wait:.0f}s before retry {_attempt+1}/5")
+            time.sleep(wait)
+    return _generate_once(mdl, temp, tok, prompt, system=system, fmt=fmt)
 
+
+def _generate_once(
+    mdl: str,
+    temp: float,
+    tok: int,
+    prompt: str,
+    *,
+    system: Optional[str] = None,
+    fmt: Optional[dict | str] = None,
+) -> str:
     if fmt is not None and isinstance(fmt, dict):
         # Use tool_use to get guaranteed schema-conformant JSON
         tool = {

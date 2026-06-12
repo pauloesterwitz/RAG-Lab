@@ -161,6 +161,29 @@ than passage-level similarity.
 
 ---
 
+## Corpus Documents
+
+> **Demo purpose only.** The PDFs below were chosen to give the lab a diverse
+> mix of topics (ML theory, agentic AI, business applications, safety). Feel
+> free to drop your own PDFs into the `Documents/` folder and re-embed — the
+> pipeline is document-agnostic.
+
+| # | Title | Authors | Source |
+|---|-------|---------|--------|
+| 1 | [Types of Machine Learning Algorithms](https://www.intechopen.com/chapters/10694) | Taiwo Oladipupo Ayodele | Chapter in *New Advances in Machine Learning*, InTech, 2010 |
+| 2 | [Agentic AI For Network Management: Autonomous Troubleshooting And Configuration Through MCP Servers](https://jicrcr.com/) | Vivek Koodakkara Shanmughan | *Journal of International Crisis and Risk Communication Research*, Vol. 9 No. 1, 2026 |
+| 3 | [Agents of Chaos](https://arxiv.org/abs/2602.20021) | Natalie Shapira, Chris Wendler, Avery Yen et al. | arXiv:2602.20021, February 2026 |
+| 4 | [Artificial Intelligence Adoption: AI-readiness at Firm-Level](https://aisel.aisnet.org/pacis2018/230/) | PACIS 2018 authors | *PACIS 2018 Proceedings*, Association for Information Systems |
+| 5 | [Expanding AI's Impact With Organizational Learning](https://sloanreview.mit.edu/projects/expanding-ais-impact-with-organizational-learning/) | Sam Ransbotham, Shervin Khodabandeh et al. | MIT Sloan Management Review + BCG, October 2020 |
+| 6 | Towards Enhanced Safety Stock Estimation: Exploring Machine Learning Strategies for Supply Chain Demand Forecasting | João Nuno Costa Gonçalves | PhD Thesis, Universidade do Minho, December 2020 |
+| 7 | [Using AI to Enhance Business Operations](https://sloanreview.mit.edu/article/using-ai-to-enhance-business-operations/) | Monideepa Tarafdar, Cynthia M. Beath, Jeanne W. Ross | *MIT Sloan Management Review*, Summer 2019 |
+| 8 | [HyperAgents](https://arxiv.org/abs/2603.19461) | Jenny Zhang, Bingchen Zhao, Wannan Yang, Jakob Foerster, Jeff Clune, Minqi Jiang, Sam Devlin, Tatiana Shavrina | arXiv:2603.19461, March 2026 |
+| 9 | Deep Learning with Python | François Chollet | Manning Publications, 2nd edition 2021 |
+| 10 | Agentic Design Patterns: A Hands-On Guide to Building Intelligent Systems | Antonio Gulli | Book, 2025 |
+| 11 | [Software Engineering for Machine Learning: A Case Study](https://doi.org/10.1109/ICSE-SEIP.2019.00042) | Saleema Amershi et al. (Microsoft Research) | *ICSE-SEIP 2019*, IEEE |
+
+---
+
 ## Evaluation Pipeline
 
 Goldens are synthesized from gold chunks (pairs of adjacent same-document
@@ -177,6 +200,20 @@ chunks) by DeepEval's `Synthesizer`, then used to evaluate every approach.
 | **Contextual Recall** | How much of the gold answer is covered by retrieved chunks |
 | **Correctness (G-Eval)** | Factual correctness vs. the reference answer (custom criteria) |
 | **Composite** | Mean of the six metrics above |
+
+### How Each Metric Works
+
+One knowledge-graph diagram per metric, generated with the plot MCP server and
+verified by automated visual QA (Qwen3 vision model).
+
+| Metric | Inputs | Diagram |
+|--------|--------|---------|
+| Answer Relevancy | `input`, `actual_output` | ![Answer Relevancy](docs/deepeval/answer_relevancy.png) |
+| Faithfulness | `actual_output`, `retrieval_context` | ![Faithfulness](docs/deepeval/faithfulness.png) |
+| Contextual Relevancy | `input`, `retrieval_context` | ![Contextual Relevancy](docs/deepeval/contextual_relevancy.png) |
+| Contextual Precision | `input`, `expected_output`, `retrieval_context` | ![Contextual Precision](docs/deepeval/contextual_precision.png) |
+| Contextual Recall | `expected_output`, `retrieval_context` | ![Contextual Recall](docs/deepeval/contextual_recall.png) |
+| Correctness (G-Eval) | `actual_output`, `expected_output` | ![Correctness G-Eval](docs/deepeval/correctness_geval.png) |
 
 ### Retrieval-level metrics (custom, on top of DeepEval)
 
@@ -311,9 +348,8 @@ RAG_EMBED_MODEL=embeddinggemma:latest
 RAG_EMBED_DIM=768
 OLLAMA_HOST=http://localhost:11434
 
-# Chunking
-RAG_CHUNK_SIZE=1100         # characters
-RAG_CHUNK_OVERLAP=180
+# Chunking (dynamic — splits on paragraph/heading boundaries)
+# RAG_MIN_CHUNK_CHARS=120   # skip fragments shorter than this
 
 # Retrieval
 RAG_TOP_K=5                 # chunks fed to LLM
