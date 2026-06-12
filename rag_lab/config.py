@@ -1,10 +1,20 @@
 """Central configuration. Everything is overridable via environment variables so
-the Vue UI / CLI / eval harness all read the same source of truth."""
+the Vue UI / CLI / eval harness all read the same source of truth.
+
+A .env file in the project root is loaded automatically if it exists, so you
+can put ANTHROPIC_API_KEY there without polluting your shell profile."""
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
+
+# Load .env before reading os.environ below
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
+except ImportError:
+    pass
 
 # Project layout -------------------------------------------------------------
 ROOT = Path(__file__).resolve().parent.parent
@@ -29,15 +39,25 @@ os.environ.setdefault("DEEPEVAL_RESULTS_FOLDER", str(CACHE_DIR / "deepeval"))
 
 @dataclass
 class Settings:
-    # --- Ollama ---
+    # --- Provider: "claude" (default) or "ollama" ---
+    # Claude: Anthropic API for generation (ANTHROPIC_API_KEY required) +
+    #         sentence-transformers for embeddings (no separate server).
+    # Ollama: set RAG_PROVIDER=ollama RAG_EMBED_MODEL=embeddinggemma:latest RAG_EMBED_DIM=768
+    provider: str = os.environ.get("RAG_PROVIDER", "claude")
+
+    # --- Ollama (only used when provider=ollama) ---
     ollama_host: str = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-    embed_model: str = os.environ.get("RAG_EMBED_MODEL", "embeddinggemma:latest")
-    embed_dim: int = int(os.environ.get("RAG_EMBED_DIM", "768"))
-    # gemma4:e4b is the one local model here that does grammar-constrained JSON
-    # cleanly (gpt-oss returns empty under format=schema; gemma4:26b/31b crash on
-    # load). It is also fast (~60 tok/s). Override via env for higher-quality judging.
-    gen_model: str = os.environ.get("RAG_GEN_MODEL", "gemma4:e4b")
-    judge_model: str = os.environ.get("RAG_JUDGE_MODEL", "gemma4:e4b")
+
+    # --- Embeddings ---
+    # provider=claude default: intfloat/multilingual-e5-small via sentence-transformers (384-d)
+    embed_model: str = os.environ.get("RAG_EMBED_MODEL", "intfloat/multilingual-e5-small")
+    embed_dim: int = int(os.environ.get("RAG_EMBED_DIM", "384"))
+
+    # --- Generation / judging ---
+    # Keep gen_model as Sonnet (answer quality) but use Haiku for judging/synthesis
+    # to stay under the 5 RPM Sonnet limit on this org.
+    gen_model: str = os.environ.get("RAG_GEN_MODEL", "claude-sonnet-4-6")
+    judge_model: str = os.environ.get("RAG_JUDGE_MODEL", "claude-haiku-4-5-20251001")
 
     # --- Chunking ---
     chunk_size: int = int(os.environ.get("RAG_CHUNK_SIZE", "1100"))      # chars

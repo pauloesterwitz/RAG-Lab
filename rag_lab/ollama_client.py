@@ -94,6 +94,10 @@ def generate(
         payload["system"] = system
     if fmt is not None:
         payload["format"] = fmt
+    # Reasoning models (qwen3, gpt-oss) must have thinking OFF for grammar-
+    # constrained JSON to emit (and to avoid burning tokens on reasoning).
+    if think is None and ("qwen3" in model or "gpt-oss" in model):
+        think = False
     if think is not None:
         payload["think"] = think
     return _post_with_retry("/api/generate", payload).get("response", "")
@@ -118,3 +122,17 @@ def list_models() -> list[str]:
             return [m["name"] for m in r.json().get("models", [])]
     except Exception:
         return []
+
+
+# ---------------------------------------------------------------------------
+# Provider dispatch: when RAG_PROVIDER=claude, replace this module's public
+# symbols with the Claude implementations so no import sites need changing.
+# ---------------------------------------------------------------------------
+if SETTINGS.provider == "claude":
+    from .claude_client import (  # noqa: F401, E402
+        embed_one,
+        embed_many,
+        generate,
+        generate_many,
+        list_models,
+    )

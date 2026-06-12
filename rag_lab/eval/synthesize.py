@@ -17,7 +17,7 @@ from deepeval.synthesizer.config import StylingConfig, FiltrationConfig
 from ..config import SETTINGS, EVAL_DIR
 from ..indexer import load_base_index
 from ..store import BaseIndex
-from .deepeval_models import OllamaJudge
+from .deepeval_models import get_judge
 
 GOLDENS_FILE = EVAL_DIR / "goldens.json"
 
@@ -90,12 +90,12 @@ def synthesize_goldens(num: int | None = None, progress=None) -> dict:
         progress(f"Synthesizing from {len(contexts)} gold contexts using {SETTINGS.judge_model}…")
 
     synth = Synthesizer(
-        model=OllamaJudge(),
+        model=get_judge(),
         async_mode=True,
         max_concurrent=SETTINGS.gen_concurrency,
         styling_config=_STYLING,
         filtration_config=FiltrationConfig(
-            critic_model=OllamaJudge(), synthetic_input_quality_threshold=0.5, max_quality_retries=1
+            critic_model=get_judge(), synthetic_input_quality_threshold=0.5, max_quality_retries=1
         ),
     )
     goldens = synth.generate_goldens_from_contexts(

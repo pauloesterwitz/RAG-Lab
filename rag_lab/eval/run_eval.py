@@ -28,7 +28,7 @@ from ..config import SETTINGS, EVAL_DIR, APPROACH_ORDER, APPROACHES
 from ..indexer import load_base_index
 from ..approaches import get_approach
 from ..reranker import backend_name
-from .deepeval_models import OllamaJudge
+from .deepeval_models import get_judge
 from .synthesize import load_goldens
 
 RESULTS_FILE = EVAL_DIR / "results.json"
@@ -43,7 +43,7 @@ METRIC_ORDER = [
 ]
 
 
-def _build_metrics(judge: OllamaJudge) -> list:
+def _build_metrics(judge) -> list:
     common = dict(model=judge, async_mode=True, include_reason=True)
     return [
         AnswerRelevancyMetric(**common),
@@ -188,7 +188,7 @@ def run_full_eval(approaches: Optional[list[str]] = None, progress=None) -> dict
         raise RuntimeError("No goldens found. Synthesize goldens first.")
     goldens = data["goldens"]
     index = load_base_index(refresh=True)
-    judge = OllamaJudge()
+    judge = get_judge()
     approaches = approaches or APPROACH_ORDER
 
     # include each approach's golden-set questions for transparency
@@ -206,11 +206,23 @@ def run_full_eval(approaches: Optional[list[str]] = None, progress=None) -> dict
         ],
         "approaches": {},
     }
+    # Resume: if a prior results.json was produced with the SAME models/goldens,
+    # keep its completed approaches so an interruption doesn't lose progress.
+    prev = load_results()
+    if (
+        prev
+        and prev.get("judge_model") == SETTINGS.judge_model
+        and prev.get("gen_model") == SETTINGS.gen_model
+        and prev.get("num_goldens") == len(goldens)
+    ):
+        out["approaches"] = prev.get("approaches", {})
+
     for name in approaches:
         t0 = time.time()
         agg = evaluate_approach(name, goldens, index, judge, progress)
         agg["eval_seconds"] = round(time.time() - t0, 1)
         out["approaches"][name] = agg
+        out["generated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         # persist incrementally so the dashboard updates as approaches finish
         RESULTS_FILE.write_text(json.dumps(out, indent=2))
         if progress:

@@ -76,7 +76,15 @@ def load_base_index(refresh: bool = False) -> BaseIndex:
         return _BASE_CACHE
     if not BaseIndex.exists(BASE_DIR):
         raise RuntimeError("No base index yet. Re-embed the Documents folder first.")
-    _BASE_CACHE = BaseIndex.load(BASE_DIR)
+    idx = BaseIndex.load(BASE_DIR)
+    stored_dim = idx.embeddings.shape[1]
+    if stored_dim != SETTINGS.embed_dim:
+        raise RuntimeError(
+            f"Index dimension mismatch: stored={stored_dim}d but current embed_model "
+            f"'{SETTINGS.embed_model}' produces {SETTINGS.embed_dim}d vectors. "
+            "Re-embed the Documents folder first (CLI: python -m rag_lab.cli embed)."
+        )
+    _BASE_CACHE = idx
     return _BASE_CACHE
 
 
