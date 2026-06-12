@@ -281,9 +281,9 @@ Open **http://localhost:8000**.
 ```bash
 .venv/bin/python -m rag_lab.cli embed          # (re)embed Documents → base index
 .venv/bin/python -m rag_lab.cli graph          # build the GraphRAG graph
-.venv/bin/python -m rag_lab.cli synth -n 10    # synthesize 10 goldens
+.venv/bin/python -m rag_lab.cli synth -n 100   # synthesize 100 goldens
 .venv/bin/python -m rag_lab.cli eval           # DeepEval across all approaches
-.venv/bin/python -m rag_lab.cli all -n 10      # embed + graph + synth + eval
+.venv/bin/python -m rag_lab.cli all -n 100     # embed + graph + synth + eval
 .venv/bin/python -m rag_lab.cli status         # show index / graph / golden counts
 ```
 
@@ -321,11 +321,11 @@ RAG_CANDIDATE_K=20          # pre-rerank pool size
 RAG_BM25_WEIGHT=0.35        # hybrid fusion weight
 
 # Evaluation
-RAG_EVAL_NUM_GOLDENS=10     # goldens to synthesize
+RAG_EVAL_NUM_GOLDENS=100    # goldens to synthesize
 ```
 
 > **Note on rate limits (Claude provider):** this org has a ~5 RPM limit across
 > all Claude models. The client applies a 4 RPM token-bucket limiter per model
-> automatically. A full eval run with 10 goldens takes roughly 1.5–2 hours.
+> automatically. A full eval run with 100 goldens takes roughly 15–20 hours.
 > Increase `RAG_GEN_CONCURRENCY=1` (already the safe default) to avoid
 > exhausting retries.

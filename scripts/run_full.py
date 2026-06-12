@@ -7,7 +7,7 @@ from rag_lab.indexer import load_base_index
 from rag_lab.eval.synthesize import synthesize_goldens
 from rag_lab.eval.run_eval import run_full_eval
 
-N_GOLDENS = 16
+N_GOLDENS = 100
 t0 = time.time()
 
 idx = load_base_index(refresh=True)

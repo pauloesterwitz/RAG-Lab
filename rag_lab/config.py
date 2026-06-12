@@ -91,7 +91,7 @@ class Settings:
     gen_num_predict: int = int(os.environ.get("RAG_GEN_NUM_PREDICT", "768"))
 
     # --- Eval ---
-    eval_num_goldens: int = int(os.environ.get("RAG_EVAL_NUM_GOLDENS", "24"))
+    eval_num_goldens: int = int(os.environ.get("RAG_EVAL_NUM_GOLDENS", "100"))
 
     def to_dict(self) -> dict:
         return asdict(self)

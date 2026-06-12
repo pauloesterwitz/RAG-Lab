@@ -42,8 +42,9 @@ class _JinaReranker:
         self.torch = torch
         _shim_xlm_roberta(torch)
         self.model = AutoModelForSequenceClassification.from_pretrained(
-            model_name, torch_dtype="auto", trust_remote_code=True
+            model_name, trust_remote_code=True
         )
+        self.model = self.model.float()  # force float32; "auto" picks bfloat16 and causes dtype mismatch in compute_score
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model.to(self.device)
         self.model.eval()

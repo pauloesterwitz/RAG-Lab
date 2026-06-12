@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="480.096pt" height="501.973969pt" viewBox="0 0 480.096 501.973969" xmlns="http://www.w3.org/2000/svg" version="1.1">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="480.096pt" height="515.973969pt" viewBox="0 0 480.096 515.973969" xmlns="http://www.w3.org/2000/svg" version="1.1">
  <metadata>
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
@@ -1842,4 +1842,10 @@ z
    <rect x="7.2" y="29.077969" width="465.696" height="465.696"/>
   </clipPath>
  </defs>
+  <g id="branding_footer">
+    <line x1="12" y1="489" x2="468" y2="489" stroke="#cccccc" stroke-width="0.5"/>
+    <text x="240.048" y="497.5" text-anchor="middle"
+          font-family="DejaVu Sans, Arial, sans-serif" font-size="7.5"
+          fill="#888888">AI &amp; SAP Consulting Paul Oesterwitz | oesterwitz-consulting.de</text>
+  </g>
 </svg>
