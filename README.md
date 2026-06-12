@@ -28,6 +28,8 @@ The baseline. Retrieval is a **hybrid of dense vector search and BM25**:
 No query transformation, no reranking, no iterative retrieval — the cleanest
 baseline for comparing what each additional step is worth.
 
+![Plain RAG Pipeline](docs/schemas/plain_rag.png)
+
 ---
 
 ### 2. RAG + Reranker (`rerank`)
@@ -48,6 +50,8 @@ Reranker cascade (auto-selects the first that loads):
 Cross-encoders are slower than bi-encoders but more accurate because they see
 the query *and* the passage together in a single forward pass.
 
+![RAG + Reranker Pipeline](docs/schemas/rerank_rag.png)
+
 ---
 
 ### 3. HyDE — Hypothetical Document Embeddings (`hyde`)
@@ -67,6 +71,8 @@ Pipeline:
 
 Works best when the gap between query-space and answer-space is large (e.g.
 short factual questions vs. long technical passages).
+
+![HyDE Pipeline](docs/schemas/hyde_rag.png)
 
 ---
 
@@ -91,6 +97,8 @@ Pipeline:
 CRAG is valuable when initial retrieval habitually surfaces related but
 off-topic chunks (e.g. partial keyword matches).
 
+![Corrective RAG Pipeline](docs/schemas/corrective_rag.png)
+
 ---
 
 ### 5. Agentic RAG (`agentic`)
@@ -113,6 +121,8 @@ Pipeline:
 Agentic RAG handles multi-hop questions where a single retrieval pass misses
 the full picture. The transparency trace shows each iteration's sub-queries and
 the agent's sufficiency verdict.
+
+![Agentic RAG Pipeline](docs/schemas/agentic_rag.png)
 
 ---
 
@@ -146,6 +156,8 @@ at query time uses entity anchoring to retrieve structurally related chunks.
 GraphRAG benefits domains with rich entity relationships (e.g. medical
 knowledge, interconnected technical concepts) where co-citation matters more
 than passage-level similarity.
+
+![GraphRAG Pipeline](docs/schemas/graph_rag.png)
 
 ---
 
