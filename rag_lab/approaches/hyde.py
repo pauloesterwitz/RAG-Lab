@@ -3,6 +3,8 @@ answer, embed that hypothetical passage, and retrieve documents near it. BM25
 still runs on the literal query, so we get the best of both."""
 from __future__ import annotations
 
+import numpy as np
+
 from .base import Approach, RetrievedChunk, TraceStep
 from ..config import SETTINGS
 from ..ollama_client import embed_one, generate
@@ -27,9 +29,13 @@ class HydeRAG(Approach):
         ).strip()
         trace.append(TraceStep("Hypothetical document", hypothetical[:400]))
 
-        hyde_vec = embed_one(hypothetical, role="document")
+        # Blend the hypothetical-document vector WITH the literal query vector so a
+        # generic/hallucinated draft can't drift retrieval off the real query.
+        hyde_vec = np.asarray(embed_one(hypothetical, role="document"), dtype=np.float32)
+        qvec = np.asarray(embed_one(query, role="query"), dtype=np.float32)
+        blended = hyde_vec + qvec  # hybrid_search re-normalizes the query vector
         hits = self.index.hybrid_search(
-            query, hyde_vec, k=SETTINGS.top_k, bm25_weight=SETTINGS.bm25_weight
+            query, blended, k=SETTINGS.top_k, bm25_weight=SETTINGS.bm25_weight
         )
-        trace.append(TraceStep("Retrieve on HyDE vector", f"top {SETTINGS.top_k} (BM25 on literal query)"))
+        trace.append(TraceStep("Retrieve on blended HyDE+query vector", f"top {SETTINGS.top_k} (BM25 on literal query)"))
         return [RetrievedChunk(self.index.get(i), s, "hyde") for i, s in hits]

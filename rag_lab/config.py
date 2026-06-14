@@ -54,10 +54,13 @@ class Settings:
     embed_dim: int = int(os.environ.get("RAG_EMBED_DIM", "384"))
 
     # --- Generation / judging ---
-    # Keep gen_model as Sonnet (answer quality) but use Haiku for judging/synthesis
-    # to stay under the 5 RPM Sonnet limit on this org.
+    # Per user: generation, the DeepEval judge, and GraphRAG extraction all run on
+    # Sonnet 4.6. A single shared org-wide rate limiter (claude_org_rpm) keeps every
+    # Claude call (any model) under the org's ~5 RPM cap so the eval never 429s.
     gen_model: str = os.environ.get("RAG_GEN_MODEL", "claude-sonnet-4-6")
-    judge_model: str = os.environ.get("RAG_JUDGE_MODEL", "claude-haiku-4-5-20251001")
+    judge_model: str = os.environ.get("RAG_JUDGE_MODEL", "claude-sonnet-4-6")
+    graph_model: str = os.environ.get("RAG_GRAPH_MODEL", "claude-sonnet-4-6")
+    claude_org_rpm: float = float(os.environ.get("RAG_CLAUDE_ORG_RPM", "4.0"))
 
     # --- Chunking ---
     chunk_size: int = int(os.environ.get("RAG_CHUNK_SIZE", "1100"))      # chars
@@ -78,7 +81,7 @@ class Settings:
     )
 
     # --- GraphRAG ---
-    graph_max_chunks: int = int(os.environ.get("RAG_GRAPH_MAX_CHUNKS", "240"))
+    graph_max_chunks: int = int(os.environ.get("RAG_GRAPH_MAX_CHUNKS", "0"))  # 0 = all chunks (full coverage)
     graph_concurrency: int = int(os.environ.get("RAG_GRAPH_CONCURRENCY", "6"))
 
     # --- Concurrency ---

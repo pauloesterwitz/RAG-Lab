@@ -25,31 +25,26 @@ _st_model = None  # sentence-transformers SentenceTransformer, lazy-loaded
 # ---------------------------------------------------------------------------
 # Per-model token-bucket rate limiter
 # ---------------------------------------------------------------------------
-# Conservative limits: Sonnet = 4 RPM (hard limit is 5), Haiku = 50 RPM.
-# Org-wide limit is ~5 RPM across all models; use 4 RPM to stay safe.
-_MODEL_RPM: dict[str, float] = {
-    "claude-sonnet-4-6": 4.0,
-    "claude-haiku-4-5-20251001": 4.0,
-}
-_DEFAULT_RPM = 4.0
+# The org cap is ~5 RPM SHARED ACROSS ALL CLAUDE MODELS. Per-model buckets would
+# let Sonnet + Haiku each do 4 RPM and blow the shared cap, so we use ONE shared
+# bucket for every model, sized by SETTINGS.claude_org_rpm, with burst=1 (never
+# front-load a burst that 429s).
 
 
 class _TokenBucket:
-    """Thread-safe token bucket. One token = one API call."""
+    """Thread-safe token bucket. One token = one API call. burst caps the reserve."""
 
-    def __init__(self, rpm: float):
+    def __init__(self, rpm: float, burst: float = 1.0):
         self._interval = 60.0 / rpm  # seconds between tokens
-        self._tokens = min(rpm, 5.0)  # start with a small burst
+        self._burst = max(1.0, burst)
+        self._tokens = 1.0
         self._last = time.monotonic()
         self._lock = threading.Lock()
 
     def acquire(self) -> None:
         with self._lock:
             now = time.monotonic()
-            self._tokens = min(
-                self._tokens + (now - self._last) / self._interval,
-                5.0,  # cap burst
-            )
+            self._tokens = min(self._tokens + (now - self._last) / self._interval, self._burst)
             self._last = now
             if self._tokens < 1.0:
                 wait = (1.0 - self._tokens) * self._interval
@@ -59,16 +54,43 @@ class _TokenBucket:
                 self._tokens -= 1.0
 
 
-_limiters: dict[str, _TokenBucket] = {}
-_limiters_lock = threading.Lock()
+_org_limiter: Optional[_TokenBucket] = None
+_org_lock = threading.Lock()
 
 
-def _get_limiter(model: str) -> _TokenBucket:
-    with _limiters_lock:
-        if model not in _limiters:
-            rpm = _MODEL_RPM.get(model, _DEFAULT_RPM)
-            _limiters[model] = _TokenBucket(rpm)
-        return _limiters[model]
+def _get_limiter(model: Optional[str] = None) -> _TokenBucket:
+    """Return the single shared org-wide limiter (model arg kept for call-site compat)."""
+    global _org_limiter
+    with _org_lock:
+        if _org_limiter is None:
+            _org_limiter = _TokenBucket(SETTINGS.claude_org_rpm, burst=1.0)
+        return _org_limiter
+
+
+_RETRYABLE_STATUS = {429, 500, 503, 529}
+
+
+def with_retry(fn, *, retries: int = 6, base_wait: float = 15.0, what: str = "call"):
+    """Acquire the shared org limiter, run fn(), and retry with exponential backoff
+    on rate-limit / overloaded / transient 5xx errors. Used by BOTH generate() and
+    the DeepEval ClaudeJudge so no judge call is ever lost to a 429."""
+    last: Optional[Exception] = None
+    for attempt in range(retries):
+        _get_limiter().acquire()
+        try:
+            return fn()
+        except anthropic.RateLimitError as e:
+            last = e
+        except (anthropic.APIStatusError, anthropic.APIConnectionError, anthropic.APITimeoutError) as e:
+            status = getattr(e, "status_code", None)
+            if isinstance(e, anthropic.APIStatusError) and status not in _RETRYABLE_STATUS:
+                raise
+            last = e
+        wait = min(base_wait * (2 ** attempt), 180.0)
+        print(f"[claude] {type(last).__name__} on {what}; sleeping {wait:.0f}s "
+              f"(retry {attempt + 1}/{retries})", flush=True)
+        time.sleep(wait)
+    raise last if last else RuntimeError(f"with_retry exhausted for {what}")
 
 
 def _get_client() -> anthropic.Anthropic:
@@ -160,17 +182,10 @@ def generate(
     temp = SETTINGS.gen_temperature if temperature is None else temperature
     tok = max_tokens or num_predict or SETTINGS.gen_num_predict
 
-    for _attempt in range(5):
-        _get_limiter(mdl).acquire()  # respect per-model RPM ceiling
-        try:
-            return _generate_once(
-                mdl, temp, tok, prompt, system=system, fmt=fmt,
-            )
-        except anthropic.RateLimitError:
-            wait = 20.0 * (2 ** _attempt)
-            print(f"[claude] 429 rate limit on {mdl}; sleeping {wait:.0f}s before retry {_attempt+1}/5")
-            time.sleep(wait)
-    return _generate_once(mdl, temp, tok, prompt, system=system, fmt=fmt)
+    return with_retry(
+        lambda: _generate_once(mdl, temp, tok, prompt, system=system, fmt=fmt),
+        what=f"generate/{mdl}",
+    )
 
 
 def _generate_once(

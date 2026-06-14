@@ -2,19 +2,27 @@
 approaches. Results persist incrementally (data/eval/results.json) so the
 dashboard updates after each approach completes."""
 import time
+from rag_lab.config import SETTINGS
 from rag_lab.graph_build import build_graph, graph_exists, get_graph_meta
 from rag_lab.indexer import load_base_index
 from rag_lab.eval.synthesize import synthesize_goldens
 from rag_lab.eval.run_eval import run_full_eval
 
-N_GOLDENS = 100
+N_GOLDENS = SETTINGS.eval_num_goldens  # set via RAG_EVAL_NUM_GOLDENS
 t0 = time.time()
 
 idx = load_base_index(refresh=True)
 
 print("=== STAGE 1/3: GraphRAG graph ===", flush=True)
-meta = build_graph(idx, progress=lambda s, f, m: print(f"  [graph {f*100:3.0f}%] {m}", flush=True))
-print("  graph:", meta, flush=True)
+_gm = get_graph_meta()
+_target = len(idx.chunks) if SETTINGS.graph_max_chunks <= 0 else min(SETTINGS.graph_max_chunks, len(idx.chunks))
+if (graph_exists() and _gm and _gm.get("model") == SETTINGS.graph_model
+        and _gm.get("chunks_processed", 0) >= int(_target * 0.95)):
+    print(f"  graph already built with {_gm['model']} over {_gm['chunks_processed']} chunks "
+          f"— skipping (rm -rf data/indexes/graph to force rebuild)", flush=True)
+else:
+    meta = build_graph(idx, progress=lambda s, f, m: print(f"  [graph {f*100:3.0f}%] {m}", flush=True))
+    print("  graph:", meta, flush=True)
 
 print("=== STAGE 2/3: synthesize goldens ===", flush=True)
 payload = synthesize_goldens(num=N_GOLDENS, progress=lambda m: print("  synth:", m, flush=True))

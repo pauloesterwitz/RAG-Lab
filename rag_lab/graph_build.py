@@ -68,14 +68,15 @@ def _norm(name: str) -> str:
 
 
 def _select_chunks(index: BaseIndex, cap: int) -> list[int]:
-    """Round-robin across documents so the graph covers every PDF."""
+    """Round-robin across documents so the graph covers every PDF. cap<=0 = all chunks."""
     by_doc: dict[str, list[int]] = defaultdict(list)
     for i, c in enumerate(index.chunks):
         by_doc[c.doc].append(i)
+    cap = len(index.chunks) if cap <= 0 else min(cap, len(index.chunks))
     order: list[int] = []
     docs = list(by_doc.values())
     pos = 0
-    while len(order) < min(cap, len(index.chunks)):
+    while len(order) < cap:
         progressed = False
         for lst in docs:
             if pos < len(lst):
@@ -95,16 +96,32 @@ def build_graph(index: BaseIndex, progress: Optional[Callable[[str, float, str],
     t0 = time.time()
 
     sel = _select_chunks(index, SETTINGS.graph_max_chunks)
-    progress("graph", 0.0, f"Extracting entities from {len(sel)} chunks…")
-
-    prompts = [_EXTRACT_PROMPT.format(text=index.get(i).text[:1600]) for i in sel]
-    raws = generate_many(
-        prompts,
-        concurrency=SETTINGS.graph_concurrency,
-        fmt=_EXTRACT_SCHEMA,
-        num_predict=512,
-        temperature=0.0,
-    )
+    # Per-chunk extraction cache keyed by model → a multi-hour Sonnet build is
+    # resumable: re-runs skip already-extracted chunks instead of paying again.
+    extract_dir = GRAPH_DIR / "extractions" / re.sub(r"[^A-Za-z0-9._-]", "_", SETTINGS.graph_model)
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    raws: list[str] = [""] * len(sel)
+    todo: list[int] = []
+    for k, i in enumerate(sel):
+        cache_f = extract_dir / f"{index.get(i).id}.json"
+        if cache_f.exists():
+            raws[k] = cache_f.read_text()
+        else:
+            todo.append(k)
+    progress("graph", 0.0, f"Extracting entities from {len(sel)} chunks ({len(sel)-len(todo)} cached, {len(todo)} to do) via {SETTINGS.graph_model}…")
+    if todo:
+        prompts = [_EXTRACT_PROMPT.format(text=index.get(sel[k]).text[:1600]) for k in todo]
+        new = generate_many(
+            prompts,
+            model=SETTINGS.graph_model,
+            concurrency=SETTINGS.graph_concurrency,
+            fmt=_EXTRACT_SCHEMA,
+            num_predict=512,
+            temperature=0.0,
+        )
+        for k, raw in zip(todo, new):
+            raws[k] = raw or "{}"
+            (extract_dir / f"{index.get(sel[k]).id}.json").write_text(raws[k])
 
     G = nx.Graph()
     entity_chunks: dict[str, set[str]] = defaultdict(set)
@@ -163,7 +180,7 @@ def build_graph(index: BaseIndex, progress: Optional[Callable[[str, float, str],
         "relationships": G.number_of_edges(),
         "communities": len(comm_summaries),
         "build_seconds": round(time.time() - t0, 1),
-        "model": SETTINGS.gen_model,
+        "model": SETTINGS.graph_model,
     }
     META_FILE.write_text(json.dumps(meta, indent=2))
     progress("graph", 1.0, f"Graph: {meta['entities']} entities, {meta['relationships']} edges, {meta['communities']} communities.")
@@ -207,7 +224,7 @@ def _summarize_communities(G, communities, index, entity_chunks, progress) -> di
             "Representative text:\n" + "\n---\n".join(snippets)
         )
         try:
-            summary = generate(prompt, num_predict=180, temperature=0.2).strip()
+            summary = generate(prompt, model=SETTINGS.graph_model, num_predict=180, temperature=0.2).strip()
         except Exception:
             summary = "Entities: " + ", ".join(top_entities)
         out[str(cid)] = {"entities": top_entities, "summary": summary, "size": len(members)}

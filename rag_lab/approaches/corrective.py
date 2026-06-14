@@ -11,8 +11,8 @@ from ..ollama_client import embed_one, generate
 
 _GRADE_SCHEMA = {
     "type": "object",
-    "properties": {"score": {"type": "number"}, "reason": {"type": "string"}},
-    "required": ["score"],
+    "properties": {"scores": {"type": "array", "items": {"type": "number"}}},
+    "required": ["scores"],
 }
 _REWRITE_SCHEMA = {
     "type": "object",
@@ -26,17 +26,24 @@ class CorrectiveRAG(Approach):
     relevance_threshold = 0.5
     min_good = 3
 
-    def _grade(self, query: str, text: str) -> float:
+    def _grade_batch(self, query: str, texts: list[str]) -> list[float]:
+        """Grade ALL passages in ONE LLM call (was one call per passage → 26+/query
+        and ~339 s latency). Returns a 0-1 score per passage, in order."""
+        if not texts:
+            return []
+        blocks = "\n\n".join(f"[{j}] {t[:900]}" for j, t in enumerate(texts))
         prompt = (
-            f"Question: {query}\n\nRetrieved passage:\n{text[:1500]}\n\n"
-            "Grade how well this passage helps answer the question, from 0.0 (irrelevant) "
-            'to 1.0 (directly answers). Reply JSON: {"score": <0-1>, "reason": "<short>"}.'
+            f"Question: {query}\n\nGrade how well EACH passage helps answer the question, "
+            f"from 0.0 (irrelevant) to 1.0 (directly answers).\n\n{blocks}\n\n"
+            f'Reply JSON: {{"scores": [<one number per passage, {len(texts)} total, in order>]}}.'
         )
         try:
-            raw = generate(prompt, fmt=_GRADE_SCHEMA, num_predict=120, temperature=0.0)
-            return max(0.0, min(1.0, float(json.loads(raw).get("score", 0.0))))
+            raw = generate(prompt, fmt=_GRADE_SCHEMA, num_predict=256, temperature=0.0)
+            sc = [max(0.0, min(1.0, float(s))) for s in json.loads(raw).get("scores", [])]
         except Exception:
-            return 0.0
+            sc = []
+        sc = sc[: len(texts)] + [0.0] * (len(texts) - len(sc))
+        return sc
 
     def _rewrite(self, query: str) -> list[str]:
         prompt = (
@@ -57,28 +64,38 @@ class CorrectiveRAG(Approach):
 
     def retrieve(self, query: str, trace: list[TraceStep]) -> list[RetrievedChunk]:
         hits = self._search(query, SETTINGS.candidate_k)
-        graded: dict[int, float] = {}
-        for i, _ in hits[:8]:  # grade the head of the pool
-            graded[i] = self._grade(query, self.index.get(i).text)
-        good = {i: s for i, s in graded.items() if s >= self.relevance_threshold}
-        trace.append(
-            TraceStep(
-                "Grade documents",
-                f"{len(good)}/{len(graded)} passed (≥{self.relevance_threshold}); "
-                f"max score {max(graded.values()) if graded else 0:.2f}",
-            )
-        )
+        hscore: dict[int, float] = {i: s for i, s in hits}
+
+        head = [i for i, _ in hits[:8]]
+        scores = self._grade_batch(query, [self.index.get(i).text for i in head])
+        graded: dict[int, float] = dict(zip(head, scores))
+        good = {i for i, s in graded.items() if s >= self.relevance_threshold}
+        trace.append(TraceStep(
+            "Grade documents (batched)",
+            f"{len(good)}/{len(graded)} passed (≥{self.relevance_threshold}); "
+            f"max {max(graded.values()) if graded else 0:.2f}",
+        ))
 
         if len(good) < self.min_good:
             rewrites = self._rewrite(query)
             trace.append(TraceStep("Corrective action", "weak results → rewrite + re-retrieve: " + " | ".join(rewrites)))
+            new: list[int] = []
             for rq in rewrites:
-                for i, _ in self._search(rq, 6):
-                    if i not in graded:
-                        graded[i] = self._grade(query, self.index.get(i).text)
-            good = {i: s for i, s in graded.items() if s >= self.relevance_threshold}
-            if not good:  # accept best-effort
-                good = dict(sorted(graded.items(), key=lambda x: x[1], reverse=True)[: self.min_good])
+                for i, s in self._search(rq, 5):
+                    hscore.setdefault(i, s)
+                    if i not in graded and i not in new:
+                        new.append(i)
+            for i, s in zip(new, self._grade_batch(query, [self.index.get(i).text for i in new])):
+                graded[i] = s
+            good = {i for i, s in graded.items() if s >= self.relevance_threshold}
 
-        ranked = sorted(good.items(), key=lambda x: x[1], reverse=True)[: SETTINGS.top_k]
-        return [RetrievedChunk(self.index.get(i), s, "graded") for i, s in ranked]
+        # Rank by a BLEND of grade + retrieval score over graded ∪ hybrid hits, so a
+        # confident retrieval (e.g. the gold chunk) is never dropped by a noisy grade,
+        # and we always return top_k.
+        def blended(i: int) -> float:
+            return 0.6 * graded.get(i, 0.0) + 0.4 * hscore.get(i, 0.0)
+
+        pool = set(graded) | set(hscore)
+        ranked = sorted(pool, key=blended, reverse=True)[: SETTINGS.top_k]
+        trace.append(TraceStep("Rank by grade+retrieval blend", f"{len(good)} passed grade; returning top {len(ranked)}"))
+        return [RetrievedChunk(self.index.get(i), blended(i), "graded") for i in ranked]

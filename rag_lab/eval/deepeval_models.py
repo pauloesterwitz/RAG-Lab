@@ -19,9 +19,12 @@ from ..ollama_client import generate as ollama_generate, embed_one, embed_many
 
 _JSON_RE = re.compile(r"\{.*\}", re.S)
 
-# Single shared, bounded executor: caps how many Ollama calls hit the local
-# server at once no matter how many async eval tasks DeepEval fans out.
-_EXEC = cf.ThreadPoolExecutor(max_workers=max(2, SETTINGS.gen_concurrency))
+# Single shared, bounded executor: caps how many backend calls fire at once no
+# matter how many async eval tasks DeepEval fans out. For Claude we serialize
+# (workers=1): the shared org rate limiter makes concurrency pointless and bursty.
+_EXEC = cf.ThreadPoolExecutor(
+    max_workers=1 if SETTINGS.provider == "claude" else max(2, SETTINGS.gen_concurrency)
+)
 
 
 async def _run(fn, *a):
@@ -134,32 +137,38 @@ class ClaudeJudge(DeepEvalBaseLLM):
         self, prompt: str, schema: Optional[type[BaseModel]] = None
     ) -> Union[str, BaseModel]:
         # NOTE: must return the BARE result (not a tuple) — see OllamaJudge note above.
+        # All calls go through with_retry, which acquires the shared org-wide rate
+        # limiter and retries on 429/overload — so a judge call is never lost to a 429.
+        from ..claude_client import with_retry
+
         if schema is not None:
-            json_schema = schema.model_json_schema()
             tool = {
                 "name": "output",
                 "description": "Return the evaluation result",
-                "input_schema": json_schema,
+                "input_schema": schema.model_json_schema(),
             }
-            from ..claude_client import _get_limiter
-            _get_limiter(self.model_name).acquire()
-            resp = self._get_client().messages.create(
-                model=self.model_name,
-                max_tokens=2048,
-                messages=[{"role": "user", "content": prompt}],
-                tools=[tool],
-                tool_choice={"type": "tool", "name": "output"},
+            resp = with_retry(
+                lambda: self._get_client().messages.create(
+                    model=self.model_name,
+                    max_tokens=2048,
+                    messages=[{"role": "user", "content": prompt}],
+                    tools=[tool],
+                    tool_choice={"type": "tool", "name": "output"},
+                ),
+                what=f"judge/{self.model_name}",
             )
             for block in resp.content:
                 if getattr(block, "type", None) == "tool_use" and block.name == "output":
                     return schema.model_validate(block.input)
             return schema.model_validate({})
-        from ..claude_client import _get_limiter
-        _get_limiter(self.model_name).acquire()
-        resp = self._get_client().messages.create(
-            model=self.model_name,
-            max_tokens=2048,
-            messages=[{"role": "user", "content": prompt}],
+
+        resp = with_retry(
+            lambda: self._get_client().messages.create(
+                model=self.model_name,
+                max_tokens=2048,
+                messages=[{"role": "user", "content": prompt}],
+            ),
+            what=f"judge/{self.model_name}",
         )
         return resp.content[0].text if resp.content else ""
 

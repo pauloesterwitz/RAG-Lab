@@ -68,6 +68,12 @@ class AgenticRAG(Approach):
         trace.append(TraceStep("Plan sub-queries", " | ".join(subqueries)))
 
         collected: dict[int, float] = {}
+        # SEED with the ORIGINAL query's own top hits, privileged with a bonus so a
+        # drifting sub-query can never bury the direct answer (e.g. the gold chunk).
+        for i, s in self._search(query, SETTINGS.candidate_k):
+            collected[i] = s + 0.15
+        trace.append(TraceStep("Seed: original query", f"{len(collected)} direct hits (privileged)"))
+
         pending = list(subqueries)
         for it in range(self.max_iters):
             if not pending:
@@ -75,7 +81,8 @@ class AgenticRAG(Approach):
             for sq in pending:
                 for i, s in self._search(sq, self.per_query_k):
                     collected[i] = max(collected.get(i, 0.0), s)
-            gathered = [self.index.get(i).text for i in collected]
+            top_ids = sorted(collected, key=lambda i: collected[i], reverse=True)[:8]
+            gathered = [self.index.get(i).text for i in top_ids]
             sufficient, followups = self._reflect(query, gathered)
             trace.append(
                 TraceStep(

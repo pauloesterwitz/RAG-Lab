@@ -11,6 +11,8 @@ import random
 from collections import defaultdict
 from pathlib import Path
 
+import numpy as np
+
 from deepeval.synthesizer import Synthesizer
 from deepeval.synthesizer.config import StylingConfig, FiltrationConfig
 
@@ -81,18 +83,66 @@ def _select_contexts(index: BaseIndex, n: int) -> tuple[list[list[str]], list[st
     return contexts, sources, key_to_ids
 
 
-def synthesize_goldens(num: int | None = None, progress=None) -> dict:
+def _select_multihop_contexts(index: BaseIndex, n: int) -> tuple[list[list[str]], list[str], dict]:
+    """Cross-document contexts: pair each seed chunk with its most semantically
+    similar chunk in a DIFFERENT document. A question synthesized from the pair
+    needs to combine both sources — exactly where single-shot plain retrieval
+    struggles and reranking / agentic / graph should help."""
+    emb = index.embeddings  # already L2-normalized (N, d)
+    eligible = [i for i, c in enumerate(index.chunks) if c.char_count >= 600]
+    rng = random.Random(43)
+    rng.shuffle(eligible)
+
+    contexts: list[list[str]] = []
+    sources: list[str] = []
+    key_to_ids: dict[str, list[str]] = {}
+    used: set[int] = set()
+    for si in eligible:
+        if len(contexts) >= n:
+            break
+        if si in used:
+            continue
+        seed_doc = index.chunks[si].doc
+        sims = emb @ emb[si]
+        partner = None
+        for j in np.argsort(-sims):
+            j = int(j)
+            if j != si and j not in used and index.chunks[j].doc != seed_doc and index.chunks[j].char_count >= 600:
+                partner = j
+                break
+        if partner is None:
+            continue
+        used.add(si)
+        used.add(partner)
+        texts = [index.chunks[si].text, index.chunks[partner].text]
+        ids = [index.chunks[si].id, index.chunks[partner].id]
+        contexts.append(texts)
+        sources.append(f"{seed_doc} + {index.chunks[partner].doc}")
+        key_to_ids[_ctx_key(texts)] = ids
+    return contexts, sources, key_to_ids
+
+
+def synthesize_goldens(num: int | None = None, multihop_frac: float = 0.5, progress=None) -> dict:
     num = num or SETTINGS.eval_num_goldens
     index = load_base_index(refresh=True)
-    # oversample contexts; filtration may drop some
-    contexts, sources, key_to_ids = _select_contexts(index, int(num * 1.4) + 2)
+    n_multi = int(round(num * multihop_frac))
+    n_single = num - n_multi
+    # oversample (filtration drops some)
+    s_ctx, s_src, s_keys = _select_contexts(index, int(n_single * 1.4) + 2)
+    m_ctx, m_src, m_keys = _select_multihop_contexts(index, int(n_multi * 1.4) + 2)
+    key_hop = {k: "single" for k in s_keys} | {k: "multi" for k in m_keys}
+    key_to_ids = {**s_keys, **m_keys}
+    contexts = s_ctx + m_ctx
+    sources = s_src + m_src
     if progress:
-        progress(f"Synthesizing from {len(contexts)} gold contexts using {SETTINGS.judge_model}…")
+        progress(f"Synthesizing {n_single} single-hop + {n_multi} multi-hop from "
+                 f"{len(contexts)} contexts using {SETTINGS.judge_model}…")
 
     synth = Synthesizer(
         model=get_judge(),
         async_mode=True,
-        max_concurrent=SETTINGS.gen_concurrency,
+        # Claude: serialize — the shared org rate limiter makes concurrency bursty.
+        max_concurrent=1 if SETTINGS.provider == "claude" else SETTINGS.gen_concurrency,
         styling_config=_STYLING,
         filtration_config=FiltrationConfig(
             critic_model=get_judge(), synthetic_input_quality_threshold=0.5, max_quality_retries=1
@@ -106,25 +156,33 @@ def synthesize_goldens(num: int | None = None, progress=None) -> dict:
     )
 
     out = []
-    for g in goldens[:num]:
+    for g in goldens:
         ctx = list(g.context or [])
+        k = _ctx_key(ctx)
         out.append(
             {
                 "input": g.input,
                 "expected_output": g.expected_output,
                 "context": ctx,
                 "source_file": g.source_file,
-                "gold_chunk_ids": key_to_ids.get(_ctx_key(ctx), []),
+                "hop": key_hop.get(k, "single"),
+                "gold_chunk_ids": key_to_ids.get(k, []),
             }
         )
+    # keep a balanced cut near `num`
+    singles = [o for o in out if o["hop"] == "single"][:n_single]
+    multis = [o for o in out if o["hop"] == "multi"][:n_multi]
+    out = singles + multis
     payload = {
         "judge_model": SETTINGS.judge_model,
         "num_goldens": len(out),
+        "n_single": len(singles),
+        "n_multi": len(multis),
         "goldens": out,
     }
     GOLDENS_FILE.write_text(json.dumps(payload, indent=2))
     if progress:
-        progress(f"Synthesized {len(out)} goldens → {GOLDENS_FILE.name}")
+        progress(f"Synthesized {len(out)} goldens ({len(singles)} single, {len(multis)} multi) → {GOLDENS_FILE.name}")
     return payload
 
 

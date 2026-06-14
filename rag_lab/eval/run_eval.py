@@ -94,6 +94,7 @@ def _run_approach_outputs(approach_name: str, goldens: list[dict], index, progre
             "latency_s": res.latency_s,
             "num_contexts": len(res.contexts),
             "context_chars": sum(len(t) for t in res.context_texts()),
+            "hop": g.get("hop", "single"),
             "gold_chunk_hit": bool(gold_ids & set(retrieved_ids)),
             "gold_doc_hit": g.get("source_file") in retrieved_docs,
             "retrieved": [c.to_dict() for c in res.contexts],
@@ -149,10 +150,47 @@ def _aggregate(test_results, cases_info: list[dict]) -> dict:
         "avg_context_chars": int(mean([c["context_chars"] for c in cases_info])),
         "avg_num_contexts": round(mean([c["num_contexts"] for c in cases_info]), 1),
     }
-    # composite DeepEval score = mean of available metric means
+    # composite DeepEval score = mean of available metric means.
+    # Loud guard: a None metric (API error) silently inflated the composite before —
+    # warn and record how many metrics actually fed it so it can't masquerade again.
+    missing = [name for name, v in metrics_mean.items() if v is None]
+    if missing:
+        print(
+            f"[eval] WARNING: metric(s) with NO score (API error / rate limit): {missing}. "
+            f"Composite uses {len(METRIC_ORDER) - len(missing)}/{len(METRIC_ORDER)} metrics.",
+            flush=True,
+        )
     avail = [v for v in metrics_mean.values() if v is not None]
     composite = round(mean(avail), 3) if avail else None
-    return {"metrics": metrics_mean, "composite": composite, "extra": extra, "cases": per_case_scores}
+
+    # Split metrics by golden type (single-hop vs multi-hop) so we can see where the
+    # advanced approaches actually beat plain (they should on multi-hop).
+    by_hop: dict[str, dict] = {}
+    for hop in ("single", "multi"):
+        idxs = [j for j, c in enumerate(cases_info) if c.get("hop") == hop]
+        if not idxs:
+            continue
+        hop_metrics = {}
+        for name in METRIC_ORDER:
+            vals = [per_case_scores[j][name]["score"] for j in idxs if per_case_scores[j][name]["score"] is not None]
+            hop_metrics[name] = round(mean(vals), 3) if vals else None
+        hop_avail = [v for v in hop_metrics.values() if v is not None]
+        by_hop[hop] = {
+            "n": len(idxs),
+            "composite": round(mean(hop_avail), 3) if hop_avail else None,
+            "gold_chunk_hit_rate": round(mean([1.0 if cases_info[j]["gold_chunk_hit"] else 0.0 for j in idxs]), 3),
+            "metrics": hop_metrics,
+        }
+
+    return {
+        "metrics": metrics_mean,
+        "composite": composite,
+        "metrics_used": len(avail),
+        "metrics_total": len(METRIC_ORDER),
+        "by_hop": by_hop,
+        "extra": extra,
+        "cases": per_case_scores,
+    }
 
 
 def evaluate_approach(approach_name: str, goldens: list[dict], index, judge, progress=None) -> dict:
@@ -165,7 +203,12 @@ def evaluate_approach(approach_name: str, goldens: list[dict], index, judge, pro
     result = evaluate(
         test_cases=cases,
         metrics=metrics,
-        async_config=AsyncConfig(run_async=True, max_concurrent=max(2, SETTINGS.gen_concurrency), throttle_value=0),
+        async_config=AsyncConfig(
+            run_async=True,
+            # Claude: serialize — the shared org rate limiter makes concurrency bursty.
+            max_concurrent=1 if SETTINGS.provider == "claude" else max(2, SETTINGS.gen_concurrency),
+            throttle_value=0,
+        ),
         display_config=DisplayConfig(show_indicator=False, print_results=False),
         error_config=ErrorConfig(ignore_errors=True, skip_on_missing_params=True),
     )
@@ -223,6 +266,7 @@ def run_full_eval(approaches: Optional[list[str]] = None, progress=None) -> dict
         agg["eval_seconds"] = round(time.time() - t0, 1)
         out["approaches"][name] = agg
         out["generated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        out["reranker"] = backend_name()  # truthful once the rerank approach has run
         # persist incrementally so the dashboard updates as approaches finish
         RESULTS_FILE.write_text(json.dumps(out, indent=2))
         if progress:
