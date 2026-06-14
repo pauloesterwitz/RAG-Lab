@@ -229,3 +229,22 @@ kg(
 
 print("\nAll 6 plots generated.")
 print("PNGs:", sorted(p.name for p in OUT.glob("*.png")))
+
+# ── Brand logo overlay (bottom-right) ────────────────────────────
+from PIL import Image as _PIL
+
+_LOGO_PATH = Path("/home/pauloesterwitz/PPTX MCP/AI & SAP Consulting Paul Oesterwitz/assets/logo-trans.png")
+if _LOGO_PATH.exists():
+    _logo_src = _PIL.open(_LOGO_PATH).convert("RGBA")
+    _logo_h = 44
+    _logo = _logo_src.resize(
+        (int(_logo_src.width * _logo_h / _logo_src.height), _logo_h), _PIL.LANCZOS
+    )
+    for _p in sorted(OUT.glob("*.png")):
+        _img = _PIL.open(_p).convert("RGBA")
+        _W, _H = _img.size
+        _img.paste(_logo, (_W - _logo.width - 18, _H - _logo.height - 18), _logo)
+        _img.convert("RGB").save(_p, "PNG")
+    print("Brand logo added to all PNGs.")
+else:
+    print("[WARN] Brand logo not found — skipping overlay.")
