@@ -285,39 +285,51 @@ Bold = best in column.
 
 ## Web App
 
-Four tabs, served by FastAPI at `http://localhost:8000`:
+A Vue 3 single-page application served directly by the FastAPI backend.
+The built static files live in `web/dist/` and are mounted at `/` by the
+FastAPI server — no separate web server needed in production.
+
+![RAG Lab Dashboard](docs/screenshots/dashboard.png)
+
+The UI is split into four tabs:
 
 ### Index & Eval
-Orchestrate the full pipeline from the UI:
-- **Re-embed** — chunk all PDFs and build the base dense + BM25 index (live
-  progress bar per document).
-- **Build graph** — run the offline GraphRAG extraction and community
-  summarisation.
-- **Synthesize goldens** — generate evaluation Q&A pairs from gold chunks.
-- **Run DeepEval** — evaluate all approaches; results stream in per approach
-  as they finish.
+Orchestrate the full pipeline without touching the CLI:
+- **Re-embed** — chunk every PDF in `Documents/` and build the dense + BM25
+  index. A live progress bar updates per document as chunks are written.
+- **Build graph** — run the offline GraphRAG entity-extraction and Louvain
+  community-detection pass (only needed for the GraphRAG approach).
+- **Synthesize goldens** — generate evaluation Q&A pairs from gold chunks
+  (single-hop and multi-hop, configurable count).
+- **Run DeepEval** — evaluate all six approaches concurrently; DeepEval metric
+  scores stream into the dashboard per approach as they land.
 
 ### Chat / Explore
-Pick one of the six approaches, ask a question, and inspect:
-- The **generated answer** with inline source citations (`[1]`, `[2]`, …).
-- **Retrieved chunks** quoted verbatim with citation, document name, pages, and
-  retrieval score.
-- The full **retrieval trace** (sub-queries, grading decisions, graph anchors,
-  community summaries, etc.) rendered as a collapsible step list.
+Select one of the six approaches from a dropdown, type a question, and see:
+- The **generated answer** with inline numbered citations.
+- **Retrieved chunks** quoted verbatim, each with document name, page range,
+  retrieval score, and its citation index.
+- The full **retrieval trace** — sub-queries, grading decisions, graph anchor
+  entities, community summaries, iteration logs — shown as a collapsible step
+  list so you can follow exactly what each pipeline did.
 
 ### DeepEval Dashboard
-- **Radar chart** — all six metrics overlaid per approach for at-a-glance
-  comparison.
-- **Bar charts** — per-metric breakdown.
-- **Summary table** — composite and per-metric scores; best per column
-  highlighted.
-- **Retrieval-level metrics** — latency, hit rates, context size.
-- **Per-question drill-down** — click any golden to see every metric score and
-  the model's reasoning per approach.
+The main benchmarking view:
+- **Radar chart** — all six DeepEval metrics overlaid for every approach in one
+  spider plot; coloured by approach for quick comparison.
+- **Bar charts** — per-metric breakdown across approaches.
+- **Summary table** — composite score + all six metrics; best value per column
+  highlighted; single-hop vs multi-hop split visible per approach.
+- **Retrieval-level metrics** — average latency, gold-chunk hit rate,
+  gold-document hit rate, average context characters and chunk count.
+- **Per-question drill-down** — click any row in the goldens table to see every
+  approach's metric scores and the judge model's scoring rationale for that
+  specific question.
 
 ### Goldens
-Browse the synthesized evaluation set: question, expected answer, source
-document, and the gold chunks the question was generated from.
+Browse the synthesized evaluation set: question text, expected answer, source
+document, page range, and the exact gold chunks the question was generated from.
+Useful for verifying synthesized quality before running a full eval.
 
 ---
 
@@ -339,32 +351,50 @@ document, and the gold chunks the question was generated from.
 
 ## Setup
 
+**Prerequisites:** Python ≥ 3.10, Node.js ≥ 18.
+
 ```bash
-# Python environment (already exists in this checkout)
+# 1. Python environment
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# Frontend
+# 2. Build the Vue frontend (output goes to web/dist/)
 cd web && npm install && npm run build && cd ..
 
-# API key (Claude provider — default)
+# 3. Credentials
 cp .env.example .env
-# edit .env:  ANTHROPIC_API_KEY=sk-ant-...
+# edit .env — set ANTHROPIC_API_KEY for the Claude provider, or switch to
+# RAG_PROVIDER=ollama (no key needed; requires a running Ollama instance)
 ```
 
 ---
 
 ## Run
 
-```bash
-# Start the server (serves built Vue app + API)
-.venv/bin/python -m uvicorn rag_lab.api.server:app --host 0.0.0.0 --port 8000
+### Production mode (one process)
 
-# Optional: hot-reload frontend dev server on :5173, proxying /api → :8000
+The FastAPI server serves the built Vue app at `/` and the API at `/api`:
+
+```bash
+.venv/bin/python -m uvicorn rag_lab.api.server:app --host 0.0.0.0 --port 8000
+```
+
+Open **[http://localhost:8000](http://localhost:8000)**.
+
+### Development mode (hot-reload UI)
+
+Run the API and the Vite dev server side-by-side. Vite proxies `/api` requests
+to FastAPI so the full stack works without rebuilding after every frontend change:
+
+```bash
+# Terminal 1 — API
+.venv/bin/python -m uvicorn rag_lab.api.server:app --port 8000 --reload
+
+# Terminal 2 — Vue dev server (hot-reload on :5173)
 cd web && npm run dev
 ```
 
-Open **http://localhost:8000**.
+Open **[http://localhost:5173](http://localhost:5173)**.
 
 ### CLI
 
