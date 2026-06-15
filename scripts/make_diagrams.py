@@ -199,7 +199,7 @@ def plain_rag():
         {"id": "Embed Query",              "pos": (8.0, 6.0), "type": "retrieval"},
         {"id": "Score Fusion",             "pos": (5.5, 4.5), "type": "retrieval"},
         {"id": "Top-K Chunks",             "pos": (8.0, 3.0), "type": "retrieval"},
-        {"id": "LLM\n(claude-sonnet-4-6)", "pos": (4.5, 1.5), "type": "generation"},
+        {"id": "LLM\n(qwen3.6:35b)", "pos": (4.5, 1.5), "type": "generation"},
         {"id": "Answer (cited)",           "pos": (1.5, 1.5), "type": "output"},
     ]
     edges = [
@@ -208,8 +208,8 @@ def plain_rag():
         {"src": "BM25 Score",               "dst": "Score Fusion",             "label": "sparse scores"},
         {"src": "Embed Query",              "dst": "Score Fusion",             "label": "dense scores"},
         {"src": "Score Fusion",             "dst": "Top-K Chunks",             "label": ""},
-        {"src": "Top-K Chunks",             "dst": "LLM\n(claude-sonnet-4-6)", "label": "context"},
-        {"src": "LLM\n(claude-sonnet-4-6)", "dst": "Answer (cited)",           "label": ""},
+        {"src": "Top-K Chunks",             "dst": "LLM\n(qwen3.6:35b)", "label": "context"},
+        {"src": "LLM\n(qwen3.6:35b)", "dst": "Answer (cited)",           "label": ""},
     ]
     draw_diagram("plain_rag", "Plain RAG (Hybrid Retrieval)", nodes, edges)
 
@@ -223,7 +223,7 @@ def rerank_rag():
         {"id": "Candidate Pool",              "pos": (8.5, 3.2), "type": "retrieval"},
         {"id": "Reranker\n(Jina v2)",         "pos": (5.5, 1.8), "type": "intermediate"},
         {"id": "Top-K Chunks",                "pos": (2.8, 1.8), "type": "retrieval"},
-        {"id": "LLM\n(claude-sonnet-4-6)",    "pos": (1.2, 0.5), "type": "generation"},
+        {"id": "LLM\n(qwen3.6:35b)",    "pos": (1.2, 0.5), "type": "generation"},
         # output moved to far left, below
     ]
     # Answer (cited) needs space – put at separate position
@@ -237,8 +237,8 @@ def rerank_rag():
         {"src": "Score Fusion",             "dst": "Candidate Pool",          "label": "top-50"},
         {"src": "Candidate Pool",           "dst": "Reranker\n(Jina v2)",     "label": "candidates"},
         {"src": "Reranker\n(Jina v2)",      "dst": "Top-K Chunks",            "label": "reranked"},
-        {"src": "Top-K Chunks",             "dst": "LLM\n(claude-sonnet-4-6)","label": "context"},
-        {"src": "LLM\n(claude-sonnet-4-6)", "dst": "Answer (cited)",          "label": ""},
+        {"src": "Top-K Chunks",             "dst": "LLM\n(qwen3.6:35b)","label": "context"},
+        {"src": "LLM\n(qwen3.6:35b)", "dst": "Answer (cited)",          "label": ""},
     ]
     draw_diagram("rerank_rag", "Rerank RAG (Cross-Encoder Reranking)", nodes, edges)
 
@@ -249,15 +249,15 @@ def hyde_rag():
         {"id": "Hypothetical Answer\n(LLM)", "pos": (5.0, 6.2), "type": "generation"},
         {"id": "Embed Hypothesis",           "pos": (5.0, 4.4), "type": "retrieval"},
         {"id": "Top-K Chunks",               "pos": (5.0, 2.8), "type": "retrieval"},
-        {"id": "LLM\n(claude-sonnet-4-6)",   "pos": (5.0, 1.3), "type": "generation"},
+        {"id": "LLM\n(qwen3.6:35b)",   "pos": (5.0, 1.3), "type": "generation"},
         {"id": "Answer (cited)",             "pos": (1.5, 1.3), "type": "output"},
     ]
     edges = [
         {"src": "Query",                      "dst": "Hypothetical Answer\n(LLM)", "label": "generate hypothesis"},
         {"src": "Hypothetical Answer\n(LLM)", "dst": "Embed Hypothesis",           "label": "embed"},
         {"src": "Embed Hypothesis",           "dst": "Top-K Chunks",               "label": "dense search"},
-        {"src": "Top-K Chunks",               "dst": "LLM\n(claude-sonnet-4-6)",   "label": "context"},
-        {"src": "LLM\n(claude-sonnet-4-6)",   "dst": "Answer (cited)",             "label": ""},
+        {"src": "Top-K Chunks",               "dst": "LLM\n(qwen3.6:35b)",   "label": "context"},
+        {"src": "LLM\n(qwen3.6:35b)",   "dst": "Answer (cited)",             "label": ""},
     ]
     draw_diagram("hyde_rag", "HyDE RAG (Hypothetical Document Embeddings)", nodes, edges)
 
@@ -271,7 +271,7 @@ def corrective_rag():
         {"id": "Knowledge Filter\n(keep ≥0.5)",  "pos": (8.0, 2.5),  "type": "correction"},
         {"id": "LLM: Rewrite into\n3 Sub-queries","pos": (2.0, 2.5), "type": "generation"},
         {"id": "Re-retrieve\n(per sub-query)",   "pos": (2.0, 1.2),  "type": "retrieval"},
-        {"id": "LLM\n(claude-sonnet-4-6)",       "pos": (6.5, 0.6),  "type": "generation"},
+        {"id": "LLM\n(qwen3.6:35b)",       "pos": (6.5, 0.6),  "type": "generation"},
         {"id": "Answer (cited)",                 "pos": (8.8, 0.6),  "type": "output"},
     ]
     edges = [
@@ -281,9 +281,9 @@ def corrective_rag():
         {"src": "Sufficient?\n(≥3 chunks>0.5)",    "dst": "Knowledge Filter\n(keep ≥0.5)",   "label": "yes"},
         {"src": "Sufficient?\n(≥3 chunks>0.5)",    "dst": "LLM: Rewrite into\n3 Sub-queries","label": "no (weak)"},
         {"src": "LLM: Rewrite into\n3 Sub-queries","dst": "Re-retrieve\n(per sub-query)",    "label": "sub-queries"},
-        {"src": "Re-retrieve\n(per sub-query)",    "dst": "LLM\n(claude-sonnet-4-6)",        "label": "new candidates"},
-        {"src": "Knowledge Filter\n(keep ≥0.5)",   "dst": "LLM\n(claude-sonnet-4-6)",        "label": "context"},
-        {"src": "LLM\n(claude-sonnet-4-6)",        "dst": "Answer (cited)",                  "label": ""},
+        {"src": "Re-retrieve\n(per sub-query)",    "dst": "LLM\n(qwen3.6:35b)",        "label": "new candidates"},
+        {"src": "Knowledge Filter\n(keep ≥0.5)",   "dst": "LLM\n(qwen3.6:35b)",        "label": "context"},
+        {"src": "LLM\n(qwen3.6:35b)",        "dst": "Answer (cited)",                  "label": ""},
     ]
     draw_diagram("corrective_rag", "Corrective RAG (Graded Retrieval + Sub-query)", nodes, edges)
 
@@ -298,7 +298,7 @@ def agentic_rag():
         {"id": "Evidence\nSufficient?",             "pos": (5.0, 1.5), "type": "decision"},
         {"id": "Follow-up\nQueries (≤2)",           "pos": (8.2, 2.8), "type": "agent"},
         {"id": "Top-K Chunks\n(ranked by score)",   "pos": (2.2, 0.5), "type": "retrieval"},
-        {"id": "LLM\n(claude-sonnet-4-6)",          "pos": (5.5, 0.5), "type": "generation"},
+        {"id": "LLM\n(qwen3.6:35b)",          "pos": (5.5, 0.5), "type": "generation"},
         {"id": "Answer (cited)",                    "pos": (8.5, 0.5), "type": "output"},
     ]
     edges = [
@@ -310,8 +310,8 @@ def agentic_rag():
         {"src": "Evidence\nSufficient?",             "dst": "Follow-up\nQueries (≤2)",           "label": "no"},
         {"src": "Follow-up\nQueries (≤2)",           "dst": "Hybrid Retrieval\n(per sub-query)", "label": "retry"},
         {"src": "Evidence\nSufficient?",             "dst": "Top-K Chunks\n(ranked by score)",   "label": "yes"},
-        {"src": "Top-K Chunks\n(ranked by score)",   "dst": "LLM\n(claude-sonnet-4-6)",          "label": "context"},
-        {"src": "LLM\n(claude-sonnet-4-6)",          "dst": "Answer (cited)",                    "label": ""},
+        {"src": "Top-K Chunks\n(ranked by score)",   "dst": "LLM\n(qwen3.6:35b)",          "label": "context"},
+        {"src": "LLM\n(qwen3.6:35b)",          "dst": "Answer (cited)",                    "label": ""},
     ]
     draw_diagram("agentic_rag", "Agentic RAG (Multi-step Reflection Loop)", nodes, edges)
 
@@ -325,7 +325,7 @@ def graph_rag():
         {"id": "Community\nSummaries (top-k)", "pos": (2.5, 3.8),  "type": "retrieval"},
         {"id": "Entity Subgraph\n(neighbourhood)","pos": (7.5, 3.8),"type": "retrieval"},
         {"id": "Merge Context",                "pos": (5.0, 2.4),  "type": "intermediate"},
-        {"id": "LLM\n(claude-sonnet-4-6)",     "pos": (5.0, 1.0),  "type": "generation"},
+        {"id": "LLM\n(qwen3.6:35b)",     "pos": (5.0, 1.0),  "type": "generation"},
         {"id": "Answer (cited)",               "pos": (1.5, 1.0),  "type": "output"},
     ]
     edges = [
@@ -337,8 +337,8 @@ def graph_rag():
         {"src": "Hybrid Fusion",                  "dst": "Entity Subgraph\n(neighbourhood)","label": "entity expansion"},
         {"src": "Community\nSummaries (top-k)",   "dst": "Merge Context",                 "label": ""},
         {"src": "Entity Subgraph\n(neighbourhood)","dst": "Merge Context",                "label": ""},
-        {"src": "Merge Context",                  "dst": "LLM\n(claude-sonnet-4-6)",      "label": "context"},
-        {"src": "LLM\n(claude-sonnet-4-6)",       "dst": "Answer (cited)",                "label": ""},
+        {"src": "Merge Context",                  "dst": "LLM\n(qwen3.6:35b)",      "label": "context"},
+        {"src": "LLM\n(qwen3.6:35b)",       "dst": "Answer (cited)",                "label": ""},
     ]
     draw_diagram("graph_rag", "Graph RAG (Community + Entity Subgraph)", nodes, edges)
 

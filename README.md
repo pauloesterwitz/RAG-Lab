@@ -9,7 +9,7 @@ Supports two LLM providers, switchable via environment variable:
 
 | Provider | Generation & Judging | Embeddings |
 |----------|---------------------|------------|
-| **Claude** (default) | Anthropic API — `claude-sonnet-4-6` for answers, `claude-haiku-4-5-20251001` for judging | `intfloat/multilingual-e5-small` via sentence-transformers (384-d, no server) |
+| **Claude** | Anthropic API — Claude for answers + judging | `intfloat/multilingual-e5-small` via sentence-transformers (384-d, no server) |
 | **Ollama** | Any local model (e.g. `qwen3.6:35b-a3b-q8_0`) | `embeddinggemma:latest` (768-d) |
 
 ---
@@ -314,7 +314,7 @@ document, and the gold chunks the question was generated from.
 | Layer | Technology |
 |-------|-----------|
 | Embeddings | `intfloat/multilingual-e5-small` (384-d, sentence-transformers) *or* Ollama `embeddinggemma:latest` (768-d) |
-| Generation | Anthropic `claude-sonnet-4-6` *or* any Ollama model |
+| Generation | Anthropic Claude *or* any Ollama model |
 | Judging / synthesis | Anthropic `claude-haiku-4-5-20251001` *or* any Ollama model |
 | Reranker | `jinaai/jina-reranker-v2-base-multilingual` → `BAAI/bge-reranker-v2-m3` → LLM pointwise |
 | Vector store | In-process NumPy cosine + `rank-bm25` hybrid (no external DB) |
