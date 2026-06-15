@@ -14,6 +14,18 @@ Supports two LLM providers, switchable via environment variable:
 
 ---
 
+## Project structure
+
+| Path | What's inside |
+|------|---------------|
+| `rag_lab/` | Core Python package — the six approaches (`approaches/`), hybrid indexing & retrieval, generation, reranker, knowledge-graph build, the DeepEval harness (`eval/`), and the FastAPI server (`api/`). |
+| `web/` | Vue 3 + Vite single-page dashboard — re-embed, chat with any approach, the DeepEval dashboard, and the goldens browser. |
+| `scripts/` | Standalone runners — full-pipeline orchestration plus the figure generators for the pipeline schemas and metric explainers. |
+| `docs/` | Generated figures — `schemas/` (per-approach pipeline diagrams) and `deepeval/` (per-metric scoring explainers). |
+| `Documents/` | Source PDFs to index — drop your own in here and re-embed. |
+
+---
+
 ## Six RAG Approaches
 
 ### 1. Plain RAG (`plain`)

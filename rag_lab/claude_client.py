@@ -98,7 +98,7 @@ def _get_client() -> anthropic.Anthropic:
     if _client is None:
         import os
         # Support both API key (console.anthropic.com) and OAuth bearer token
-        # (Claude Code session: export ANTHROPIC_AUTH_TOKEN=<token>)
+        # (export ANTHROPIC_AUTH_TOKEN=<token>)
         auth_token = os.environ.get("ANTHROPIC_AUTH_TOKEN")
         if auth_token:
             _client = anthropic.Anthropic(auth_token=auth_token)

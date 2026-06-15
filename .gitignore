@@ -29,7 +29,7 @@ Documents/*.pdf
 .temp_test_run_data.json
 temp_test_run_data.json
 
-# --- Claude Code harness internals ---
+# --- Local agent & editor state ---
 .claude/
 
 # --- OS / editor ---
