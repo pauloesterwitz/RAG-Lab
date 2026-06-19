@@ -430,7 +430,7 @@ RAG_EMBED_DIM=384
 # API paths (/api/generate, /api/embed) transparently to the Ollama daemon and
 # also serves deepseek-v4-flash via /v1/chat/completions in an exclusive swap
 # group — so ds4 and Ollama are never co-resident in memory.
-RAG_GEN_MODEL=qwen3.6:35b-a3b-q8_0         # or: deepseek-v4-flash
+RAG_GEN_MODEL=qwen3.6:35b-a3b-q8_0
 RAG_JUDGE_MODEL=qwen3.6:35b-a3b-q8_0
 RAG_EMBED_MODEL=embeddinggemma:latest
 RAG_EMBED_DIM=768
