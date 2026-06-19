@@ -364,7 +364,8 @@ cd web && npm install && npm run build && cd ..
 # 3. Credentials
 cp .env.example .env
 # edit .env — set ANTHROPIC_API_KEY for the Claude provider, or switch to
-# RAG_PROVIDER=ollama (no key needed; requires a running Ollama instance)
+# RAG_PROVIDER=ollama (no key needed; requires llama-swap running on :28080,
+# which orchestrates Ollama + deepseek-v4-flash in an exclusive swap group)
 ```
 
 ---
@@ -424,12 +425,16 @@ RAG_JUDGE_MODEL=claude-haiku-4-5-20251001   # DeepEval judging + synthesis
 RAG_EMBED_MODEL=intfloat/multilingual-e5-small
 RAG_EMBED_DIM=384
 
-# Models — Ollama (set RAG_PROVIDER=ollama first)
-RAG_GEN_MODEL=qwen3.6:35b-a3b-q8_0
+# Models — Ollama via llama-swap (set RAG_PROVIDER=ollama first)
+# llama-swap (:28080) acts as the single entry point.  It proxies Ollama-native
+# API paths (/api/generate, /api/embed) transparently to the Ollama daemon and
+# also serves deepseek-v4-flash via /v1/chat/completions in an exclusive swap
+# group — so ds4 and Ollama are never co-resident in memory.
+RAG_GEN_MODEL=qwen3.6:35b-a3b-q8_0         # or: deepseek-v4-flash
 RAG_JUDGE_MODEL=qwen3.6:35b-a3b-q8_0
 RAG_EMBED_MODEL=embeddinggemma:latest
 RAG_EMBED_DIM=768
-OLLAMA_HOST=http://localhost:11434
+OLLAMA_HOST=http://localhost:28080           # llama-swap endpoint
 
 # Chunking (dynamic — splits on paragraph/heading boundaries)
 # RAG_MIN_CHUNK_CHARS=120   # skip fragments shorter than this

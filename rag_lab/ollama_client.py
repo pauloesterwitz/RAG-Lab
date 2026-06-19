@@ -1,6 +1,11 @@
 """Thin Ollama HTTP client: embeddings + generation, with a thread-pool helper
 for concurrent calls. EmbeddingGemma works best with task-specific prompt
-prefixes, so we apply them based on whether we embed a query or a document."""
+prefixes, so we apply them based on whether we embed a query or a document.
+
+All requests target SETTINGS.ollama_host (default: llama-swap at :28080).
+llama-swap transparently proxies Ollama-native API paths (/api/generate,
+/api/embed) to the Ollama daemon and also serves deepseek-v4-flash via the
+OpenAI-compatible /v1/chat/completions path in an exclusive swap group."""
 from __future__ import annotations
 
 import concurrent.futures as cf
@@ -14,10 +19,14 @@ from .config import SETTINGS
 _TIMEOUT = httpx.Timeout(600.0, connect=10.0)
 _RETRIES = 3
 
+# Models that require the OpenAI-compatible /v1/chat/completions path.
+# These are served by ds4 (DwarfStar) via llama-swap, not the Ollama daemon.
+_OPENAI_COMPAT_MODELS = frozenset({"deepseek-v4-flash"})
+
 
 def _post_with_retry(path: str, payload: dict) -> dict:
-    """POST to Ollama with retries — this box is shared, so calls can time out
-    or 5xx under memory pressure from other workloads."""
+    """POST to llama-swap/Ollama with retries — this box is shared, so calls
+    can time out or 5xx under memory pressure from other workloads."""
     last = None
     for attempt in range(_RETRIES):
         try:
@@ -71,6 +80,34 @@ def embed_many(
     return [r for r in results]  # type: ignore[return-value]
 
 
+def _generate_openai_compat(
+    prompt: str,
+    *,
+    model: str,
+    system: Optional[str] = None,
+    temperature: Optional[float] = None,
+    num_predict: Optional[int] = None,
+    think: Optional[bool] = None,
+) -> str:
+    """OpenAI-compatible generation for ds4-served models (e.g. deepseek-v4-flash).
+    Routes to /v1/chat/completions via llama-swap, which swaps ds4 in and Ollama out."""
+    messages: list[dict] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    # DeepSeek reasoning modes: /no_think prefix suppresses chain-of-thought tokens.
+    user_content = ("/no_think\n" + prompt) if think is False else prompt
+    messages.append({"role": "user", "content": user_content})
+    payload: dict = {
+        "model": model,
+        "messages": messages,
+        "temperature": SETTINGS.gen_temperature if temperature is None else temperature,
+        "max_tokens": num_predict or SETTINGS.gen_num_predict,
+        "stream": False,
+    }
+    data = _post_with_retry("/v1/chat/completions", payload)
+    return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+
 def generate(
     prompt: str,
     *,
@@ -84,6 +121,14 @@ def generate(
 ) -> str:
     """Single-turn generation. `fmt` may be 'json' or a JSON schema dict."""
     model = model or SETTINGS.gen_model
+
+    # deepseek-v4-flash and other ds4-served models use the OpenAI-compat path.
+    if model in _OPENAI_COMPAT_MODELS:
+        return _generate_openai_compat(
+            prompt, model=model, system=system, temperature=temperature,
+            num_predict=num_predict, think=think,
+        )
+
     options = {
         "temperature": SETTINGS.gen_temperature if temperature is None else temperature,
         "num_predict": num_predict or SETTINGS.gen_num_predict,
@@ -115,13 +160,25 @@ def generate_many(prompts: Iterable[str], *, concurrency: Optional[int] = None, 
 
 
 def list_models() -> list[str]:
+    models: list[str] = []
     try:
         with httpx.Client(timeout=httpx.Timeout(15.0)) as client:
+            # Ollama models via llama-swap proxy
             r = client.get(f"{SETTINGS.ollama_host}/api/tags")
             r.raise_for_status()
-            return [m["name"] for m in r.json().get("models", [])]
+            models = [m["name"] for m in r.json().get("models", [])]
+            # Also surface ds4 models (deepseek-v4-flash) if llama-swap exposes /v1/models
+            try:
+                r2 = client.get(f"{SETTINGS.ollama_host}/v1/models")
+                if r2.status_code == 200:
+                    ds4 = [m["id"] for m in r2.json().get("data", [])
+                           if m["id"] not in models]
+                    models = models + ds4
+            except Exception:
+                pass
     except Exception:
-        return []
+        pass
+    return models
 
 
 # ---------------------------------------------------------------------------
