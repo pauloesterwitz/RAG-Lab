@@ -46,7 +46,10 @@ class Settings:
     provider: str = os.environ.get("RAG_PROVIDER", "claude")
 
     # --- Ollama (only used when provider=ollama) ---
-    ollama_host: str = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+    # Point at llama-swap (:28080) rather than Ollama directly (:11434).
+    # llama-swap proxies Ollama-native paths transparently and also serves
+    # deepseek-v4-flash via /v1/chat/completions (exclusive group, never co-resident).
+    ollama_host: str = os.environ.get("OLLAMA_HOST", "http://localhost:28080")
 
     # --- Embeddings ---
     # provider=claude default: intfloat/multilingual-e5-small via sentence-transformers (384-d)
