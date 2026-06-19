@@ -45,11 +45,18 @@ class Settings:
     # Ollama: set RAG_PROVIDER=ollama RAG_EMBED_MODEL=embeddinggemma:latest RAG_EMBED_DIM=768
     provider: str = os.environ.get("RAG_PROVIDER", "claude")
 
-    # --- Ollama (only used when provider=ollama) ---
+    # --- Local provider (only used when provider=ollama) ---
     # Point at llama-swap (:28080) rather than Ollama directly (:11434).
-    # llama-swap proxies Ollama-native paths transparently and also serves
-    # deepseek-v4-flash via /v1/chat/completions (exclusive group, never co-resident).
+    # llama-swap only routes OpenAI/Anthropic-compatible /v1/* paths (it 404s on
+    # Ollama-native /api/*), so the client below talks /v1/embeddings +
+    # /v1/chat/completions | /v1/messages. These /v1/* paths also work against a
+    # direct Ollama daemon, so this host may be set back to :11434 if needed.
     ollama_host: str = os.environ.get("OLLAMA_HOST", "http://localhost:28080")
+    # Generation wire format for the local provider:
+    #   "openai"    -> POST /v1/chat/completions  (Ollama daemon + ds4 both speak this)
+    #   "anthropic" -> POST /v1/messages          (ds4 / deepseek-v4-flash; not the Ollama daemon)
+    # Embeddings are always OpenAI-style (/v1/embeddings); there is no Anthropic embeddings API.
+    local_api_style: str = os.environ.get("RAG_LOCAL_API", "openai")
 
     # --- Embeddings ---
     # provider=claude default: intfloat/multilingual-e5-small via sentence-transformers (384-d)

@@ -426,15 +426,18 @@ RAG_EMBED_MODEL=intfloat/multilingual-e5-small
 RAG_EMBED_DIM=384
 
 # Models — Ollama via llama-swap (set RAG_PROVIDER=ollama first)
-# llama-swap (:28080) acts as the single entry point.  It proxies Ollama-native
-# API paths (/api/generate, /api/embed) transparently to the Ollama daemon and
-# also serves deepseek-v4-flash via /v1/chat/completions in an exclusive swap
-# group — so ds4 and Ollama are never co-resident in memory.
+# llama-swap (:28080) is the single entry point. It routes only OpenAI/Anthropic-
+# compatible /v1/* paths (it 404s on Ollama-native /api/*), so the local client
+# talks /v1/embeddings + /v1/chat/completions, and keeps the Ollama daemon and
+# deepseek-v4-flash in an exclusive swap group — never co-resident in memory.
+# These /v1/* paths also work against a direct Ollama daemon, so OLLAMA_HOST may
+# be pointed back at :11434 if llama-swap isn't running.
 RAG_GEN_MODEL=qwen3.6:35b-a3b-q8_0
 RAG_JUDGE_MODEL=qwen3.6:35b-a3b-q8_0
 RAG_EMBED_MODEL=embeddinggemma:latest
 RAG_EMBED_DIM=768
 OLLAMA_HOST=http://localhost:28080           # llama-swap endpoint
+RAG_LOCAL_API=openai                         # "openai" (/v1/chat/completions) | "anthropic" (/v1/messages, ds4 only)
 
 # Chunking (dynamic — splits on paragraph/heading boundaries)
 # RAG_MIN_CHUNK_CHARS=120   # skip fragments shorter than this
