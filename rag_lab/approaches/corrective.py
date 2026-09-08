@@ -7,7 +7,7 @@ import json
 
 from .base import Approach, RetrievedChunk, TraceStep
 from ..config import SETTINGS
-from ..ollama_client import embed_one, generate
+from ..llamaswap_client import embed_one, generate
 
 _GRADE_SCHEMA = {
     "type": "object",

@@ -7,7 +7,7 @@ import json
 from typing import Optional
 
 from .config import SETTINGS
-from .ollama_client import generate
+from .llamaswap_client import generate
 
 _BACKEND = None  # cached singleton
 _BACKEND_NAME = "uninitialized"

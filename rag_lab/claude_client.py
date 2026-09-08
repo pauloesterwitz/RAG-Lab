@@ -1,7 +1,7 @@
 """Claude API client: generation via Anthropic SDK + embeddings via sentence-transformers.
 
-Drop-in replacement for ollama_client when RAG_PROVIDER=claude (the default).
-The generate() signature accepts all Ollama-compat kwargs (num_ctx, think, etc.)
+Drop-in replacement for llamaswap_client when RAG_PROVIDER=claude (the default).
+The generate() signature accepts all llama-swap-compat kwargs (num_ctx, think, etc.)
 and silently ignores the ones that don't map to Claude.
 
 Per-model token-bucket rate limiters keep us under the org's RPM ceilings

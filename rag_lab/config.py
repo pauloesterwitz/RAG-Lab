@@ -39,19 +39,19 @@ os.environ.setdefault("DEEPEVAL_RESULTS_FOLDER", str(CACHE_DIR / "deepeval"))
 
 @dataclass
 class Settings:
-    # --- Provider: "claude" (default) or "ollama" ---
+    # --- Provider: "claude" (default) or "llamaswap" ---
     # Claude: Anthropic API for generation (ANTHROPIC_API_KEY required) +
     #         sentence-transformers for embeddings (no separate server).
-    # Ollama: set RAG_PROVIDER=ollama RAG_EMBED_MODEL=embeddinggemma:latest RAG_EMBED_DIM=768
+    # llamaswap: set RAG_PROVIDER=llamaswap RAG_EMBED_MODEL=embeddinggemma:latest RAG_EMBED_DIM=768
     provider: str = os.environ.get("RAG_PROVIDER", "claude")
 
-    # --- Local provider (only used when provider=ollama) ---
-    # Point at llama-swap (:28080) rather than Ollama directly (:11434).
+    # --- Local provider (only used when provider=llamaswap) ---
+    # Point at llama-swap (:28080) rather than the Ollama daemon directly (:11434).
     # llama-swap only routes OpenAI/Anthropic-compatible /v1/* paths (it 404s on
     # Ollama-native /api/*), so the client below talks /v1/embeddings +
     # /v1/chat/completions | /v1/messages. These /v1/* paths also work against a
     # direct Ollama daemon, so this host may be set back to :11434 if needed.
-    ollama_host: str = os.environ.get("OLLAMA_HOST", "http://localhost:28080")
+    llamaswap_host: str = os.environ.get("LLAMASWAP_HOST", "http://localhost:28080")
     # Generation wire format for the local provider:
     #   "openai"    -> POST /v1/chat/completions  (Ollama daemon + ds4 both speak this)
     #   "anthropic" -> POST /v1/messages          (ds4 / deepseek-v4-flash; not the Ollama daemon)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .base import Approach, RetrievedChunk, TraceStep
 from ..config import SETTINGS
-from ..ollama_client import embed_one
+from ..llamaswap_client import embed_one
 from ..reranker import rerank, backend_name
 
 

@@ -2,7 +2,7 @@
 through here, so the answer style (grounded, cited, quoting) is consistent."""
 from __future__ import annotations
 
-from .ollama_client import generate
+from .llamaswap_client import generate
 from .ingest import Chunk
 
 SYSTEM = (

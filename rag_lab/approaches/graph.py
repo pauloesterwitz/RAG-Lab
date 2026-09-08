@@ -12,7 +12,7 @@ import numpy as np
 
 from .base import Approach, RetrievedChunk, TraceStep
 from ..config import SETTINGS
-from ..ollama_client import embed_one, generate
+from ..llamaswap_client import embed_one, generate
 from ..graph_build import GRAPH_FILE, MAP_FILE, COMM_FILE, graph_exists, _norm
 
 _QENT_SCHEMA = {

@@ -12,7 +12,7 @@ import numpy as np
 
 from .config import INDEX_DIR, SETTINGS, DOCUMENTS_DIR
 from .ingest import build_chunks, list_pdfs
-from .ollama_client import embed_many
+from .llamaswap_client import embed_many
 from .store import BaseIndex
 
 BASE_DIR = INDEX_DIR / "base"

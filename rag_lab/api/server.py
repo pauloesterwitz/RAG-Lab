@@ -27,7 +27,7 @@ from ..config import SETTINGS, APPROACHES, APPROACH_ORDER, DOCUMENTS_DIR, ROOT
 from ..indexer import build_index, load_base_index, get_manifest, invalidate_cache
 from ..graph_build import build_graph, get_graph_meta, graph_exists
 from ..ingest import list_pdfs
-from ..ollama_client import list_models
+from ..llamaswap_client import list_models
 from ..reranker import backend_name
 from ..approaches import get_approach
 from ..eval.synthesize import synthesize_goldens, load_goldens
