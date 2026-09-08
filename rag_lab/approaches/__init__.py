@@ -9,10 +9,11 @@ from .hyde import HydeRAG
 from .corrective import CorrectiveRAG
 from .agentic import AgenticRAG
 from .graph import GraphRAG
+from .pageindex import PageIndexRAG
 
 REGISTRY: dict[str, type[Approach]] = {
     cls.name: cls
-    for cls in (PlainRAG, RerankRAG, HydeRAG, CorrectiveRAG, AgenticRAG, GraphRAG)
+    for cls in (PlainRAG, RerankRAG, HydeRAG, CorrectiveRAG, AgenticRAG, GraphRAG, PageIndexRAG)
 }
 
 

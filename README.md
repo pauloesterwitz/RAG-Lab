@@ -1,6 +1,6 @@
-# RAG Lab — Comparing Six RAG Pipelines with DeepEval
+# RAG Lab — Comparing Seven RAG Pipelines with DeepEval
 
-A self-contained lab that builds **six RAG pipelines** over a corpus of PDFs,
+A self-contained lab that builds **seven RAG pipelines** over a corpus of PDFs,
 evaluates them end-to-end with **DeepEval**, and ships a **Vue** web app to
 re-embed, chat with any approach (retrieved chunks always quoted), and compare
 results on an interactive dashboard.
@@ -18,7 +18,7 @@ Supports two LLM providers, switchable via environment variable:
 
 | Path | What's inside |
 |------|---------------|
-| `rag_lab/` | Core Python package — the six approaches (`approaches/`), hybrid indexing & retrieval, generation, reranker, knowledge-graph build, the DeepEval harness (`eval/`), and the FastAPI server (`api/`). |
+| `rag_lab/` | Core Python package — the seven approaches (`approaches/`), hybrid indexing & retrieval, generation, reranker, knowledge-graph build, tree index build, the DeepEval harness (`eval/`), and the FastAPI server (`api/`). |
 | `web/` | Vue 3 + Vite single-page dashboard — re-embed, chat with any approach, the DeepEval dashboard, and the goldens browser. |
 | `scripts/` | Standalone runners — full-pipeline orchestration plus the figure generators for the pipeline schemas and metric explainers. |
 | `docs/` | Generated figures — `schemas/` (per-approach pipeline diagrams) and `deepeval/` (per-metric scoring explainers). |
@@ -26,7 +26,7 @@ Supports two LLM providers, switchable via environment variable:
 
 ---
 
-## Six RAG Approaches
+## Seven RAG Approaches
 
 ### 1. Plain RAG (`plain`)
 
@@ -173,6 +173,66 @@ than passage-level similarity.
 
 ---
 
+### 7. PageIndex (`pageindex`)
+
+**Vectorless, reasoning-based retrieval** — no embeddings decide what gets
+retrieved. Instead, each document is indexed as a hierarchical tree
+(root → section → subsection, mirroring its own table of contents), and an
+LLM navigates that tree at query time by reading node titles and summaries,
+the way a person flips straight to the right section of a report.
+
+Where the other six approaches all still bottom out in chunk-vector
+similarity (query rewriting, reranking, entity-boosted rescoring — hybrid
+search stays the underlying decision mechanism), PageIndex is the one
+approach that never scores a query against a chunk embedding to decide
+*what* to retrieve. It's the natural next experiment after GraphRAG's
+multi-hop win: GraphRAG says cross-document *entity* structure helps; this
+approach tests whether within-document *authorial* structure helps too —
+especially on single-hop "look up the right section" questions, exactly
+where a human wouldn't search at all, they'd check the table of contents.
+
+**Offline build** (`python -m rag_lab.cli pageindex`):
+
+1. **Structure extraction** — a real PDF outline (`fitz.get_toc()`) when the
+   file has bookmarks; otherwise a font-size heading heuristic (spans
+   notably larger than the document's body text, bucketed into up to 3
+   levels) run during the same page-extraction pass, so it's free and
+   deterministic. Roughly half this lab's corpus has real bookmarks; the
+   rest — including the largest single document — use the heuristic.
+2. Headings are nested into a tree (`PITreeNode`s: title, page range, level,
+   children), then every node is assigned the flat chunks whose pages
+   overlap its range — so any node, not just leaves, can serve as a
+   retrieval stopping point.
+3. **Bottom-up summarization** — leaf nodes summarize their own text; every
+   parent summarizes from its children's *titles and summaries*, not raw
+   text, bounding cost regardless of how many pages a top-level section
+   spans. LLM calls are cached to disk per node, so an interrupted build
+   resumes without re-paying for already-summarized sections.
+
+**Query-time retrieval**:
+
+1. **Root selection** — one LLM call reads every document's title + root
+   summary and marks which are relevant (this is also the multi-hop
+   mechanism: a cross-document question can mark more than one document
+   relevant, each navigated independently).
+2. **Tree descent** — per selected document, the LLM reads the current
+   node's children (title + summary + page range) and either descends into
+   up to 2 of them or stops, bounded by a max depth. Every hop is logged as
+   a transparency-trace step — an explicit, auditable path through real
+   section titles, unlike every other approach's opaque similarity score.
+3. Leaf/stop nodes hand back their precomputed chunk set (no page-overlap
+   computation happens at query time); gathered candidates across all
+   branches are deduplicated and given a final, cheap dense-similarity sort
+   for display order — structure decides *what*, similarity only decides
+   *display order among what structure already picked*.
+4. **Fallback** — if the tree wasn't built, or navigation returns nothing,
+   PageIndex degrades to plain hybrid search, same resilience guarantee as
+   GraphRAG: never worse than the baseline.
+
+![PageIndex Pipeline](docs/schemas/pageindex_rag.png)
+
+---
+
 ## Corpus Documents
 
 > **Demo purpose only.** The PDFs below were chosen to give the lab a diverse
@@ -301,11 +361,11 @@ Orchestrate the full pipeline without touching the CLI:
   community-detection pass (only needed for the GraphRAG approach).
 - **Synthesize goldens** — generate evaluation Q&A pairs from gold chunks
   (single-hop and multi-hop, configurable count).
-- **Run DeepEval** — evaluate all six approaches concurrently; DeepEval metric
+- **Run DeepEval** — evaluate all seven approaches concurrently; DeepEval metric
   scores stream into the dashboard per approach as they land.
 
 ### Chat / Explore
-Select one of the six approaches from a dropdown, type a question, and see:
+Select one of the seven approaches from a dropdown, type a question, and see:
 - The **generated answer** with inline numbered citations.
 - **Retrieved chunks** quoted verbatim, each with document name, page range,
   retrieval score, and its citation index.
@@ -343,6 +403,7 @@ Useful for verifying synthesized quality before running a full eval.
 | Reranker | `jinaai/jina-reranker-v2-base-multilingual` → `BAAI/bge-reranker-v2-m3` → LLM pointwise |
 | Vector store | In-process NumPy cosine + `rank-bm25` hybrid (no external DB) |
 | Graph | `networkx` (Louvain community detection) |
+| Tree index | `PyMuPDF` ToC extraction + font-size heading heuristic fallback (no vector store) |
 | Evaluation | `deepeval` with custom `ClaudeJudge` / `LlamaSwapJudge` |
 | Backend | FastAPI + Uvicorn |
 | Frontend | Vue 3 + Vite + Chart.js |
@@ -402,10 +463,11 @@ Open **[http://localhost:5173](http://localhost:5173)**.
 ```bash
 .venv/bin/python -m rag_lab.cli embed          # (re)embed Documents → base index
 .venv/bin/python -m rag_lab.cli graph          # build the GraphRAG graph
+.venv/bin/python -m rag_lab.cli pageindex      # build the PageIndex tree index
 .venv/bin/python -m rag_lab.cli synth -n 100   # synthesize 100 goldens
 .venv/bin/python -m rag_lab.cli eval           # DeepEval across all approaches
-.venv/bin/python -m rag_lab.cli all -n 100     # embed + graph + synth + eval
-.venv/bin/python -m rag_lab.cli status         # show index / graph / golden counts
+.venv/bin/python -m rag_lab.cli all -n 100     # embed + graph + pageindex + synth + eval
+.venv/bin/python -m rag_lab.cli status         # show index / graph / pageindex / golden counts
 ```
 
 ---
@@ -446,6 +508,13 @@ RAG_LOCAL_API=openai                         # "openai" (/v1/chat/completions) |
 RAG_TOP_K=5                 # chunks fed to LLM
 RAG_CANDIDATE_K=20          # pre-rerank pool size
 RAG_BM25_WEIGHT=0.35        # hybrid fusion weight
+
+# PageIndex
+RAG_PAGEINDEX_MODEL=claude-sonnet-4-6   # tree-build summaries + query-time navigation
+RAG_PAGEINDEX_MAX_DEPTH=4               # max hops descended per query
+RAG_PAGEINDEX_MAX_BREADTH=2             # children descended per hop
+RAG_PAGEINDEX_MAX_DOCS=3                # root-level fan-out cap (also the multi-hop cap)
+RAG_PAGEINDEX_SUMMARY_CHARS=1200        # leaf raw-text cap for summarization
 
 # Evaluation
 RAG_EVAL_NUM_GOLDENS=100    # goldens to synthesize

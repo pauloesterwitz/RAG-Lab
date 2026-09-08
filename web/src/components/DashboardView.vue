@@ -7,7 +7,7 @@ const data = ref(null)
 const error = ref('')
 const drill = ref('')
 
-const PALETTE = ['#6ea8fe', '#7ee0c0', '#f0b36b', '#c69bf0', '#f08a8a', '#88d8f0']
+const PALETTE = ['#6ea8fe', '#7ee0c0', '#f0b36b', '#c69bf0', '#f08a8a', '#88d8f0', '#e8d16b']
 
 async function load() {
   error.value = ''
