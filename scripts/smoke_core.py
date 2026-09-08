@@ -1,7 +1,7 @@
 import sys, numpy as np
 from pathlib import Path
 from rag_lab.ingest import _chunk_doc, extract_pages, list_pdfs
-from rag_lab.ollama_client import embed_many, embed_one
+from rag_lab.llamaswap_client import embed_many, embed_one
 from rag_lab.store import BaseIndex
 from rag_lab.approaches.plain import PlainRAG
 

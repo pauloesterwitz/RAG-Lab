@@ -10,7 +10,7 @@ Supports two LLM providers, switchable via environment variable:
 | Provider | Generation & Judging | Embeddings |
 |----------|---------------------|------------|
 | **Claude** | Anthropic API — Claude for answers + judging | `intfloat/multilingual-e5-small` via sentence-transformers (384-d, no server) |
-| **Ollama** | Any local model (e.g. `qwen3.6:35b-a3b-q8_0`) | `embeddinggemma:latest` (768-d) |
+| **llama-swap** | Any local model (e.g. `qwen3.6:35b-a3b-q8_0`), served via llama-swap | `embeddinggemma:latest` (768-d) |
 
 ---
 
@@ -337,13 +337,13 @@ Useful for verifying synthesized quality before running a full eval.
 
 | Layer | Technology |
 |-------|-----------|
-| Embeddings | `intfloat/multilingual-e5-small` (384-d, sentence-transformers) *or* Ollama `embeddinggemma:latest` (768-d) |
-| Generation | Anthropic Claude *or* any Ollama model |
-| Judging / synthesis | Anthropic `claude-haiku-4-5-20251001` *or* any Ollama model |
+| Embeddings | `intfloat/multilingual-e5-small` (384-d, sentence-transformers) *or* `embeddinggemma:latest` (768-d) via llama-swap |
+| Generation | Anthropic Claude *or* any local model via llama-swap |
+| Judging / synthesis | Anthropic `claude-haiku-4-5-20251001` *or* any local model via llama-swap |
 | Reranker | `jinaai/jina-reranker-v2-base-multilingual` → `BAAI/bge-reranker-v2-m3` → LLM pointwise |
 | Vector store | In-process NumPy cosine + `rank-bm25` hybrid (no external DB) |
 | Graph | `networkx` (Louvain community detection) |
-| Evaluation | `deepeval` with custom `ClaudeJudge` / `OllamaJudge` |
+| Evaluation | `deepeval` with custom `ClaudeJudge` / `LlamaSwapJudge` |
 | Backend | FastAPI + Uvicorn |
 | Frontend | Vue 3 + Vite + Chart.js |
 
@@ -364,8 +364,8 @@ cd web && npm install && npm run build && cd ..
 # 3. Credentials
 cp .env.example .env
 # edit .env — set ANTHROPIC_API_KEY for the Claude provider, or switch to
-# RAG_PROVIDER=ollama (no key needed; requires llama-swap running on :28080,
-# which orchestrates Ollama + deepseek-v4-flash in an exclusive swap group)
+# RAG_PROVIDER=llamaswap (no key needed; requires llama-swap running on :28080,
+# which orchestrates the Ollama daemon + deepseek-v4-flash in an exclusive swap group)
 ```
 
 ---
@@ -417,7 +417,7 @@ variables (or `.env`):
 
 ```bash
 # Provider
-RAG_PROVIDER=claude                          # "claude" (default) | "ollama"
+RAG_PROVIDER=claude                          # "claude" (default) | "llamaswap"
 
 # Models — Claude
 RAG_GEN_MODEL=claude-sonnet-4-6             # RAG answer generation
@@ -425,18 +425,18 @@ RAG_JUDGE_MODEL=claude-haiku-4-5-20251001   # DeepEval judging + synthesis
 RAG_EMBED_MODEL=intfloat/multilingual-e5-small
 RAG_EMBED_DIM=384
 
-# Models — Ollama via llama-swap (set RAG_PROVIDER=ollama first)
+# Models — local, via llama-swap (set RAG_PROVIDER=llamaswap first)
 # llama-swap (:28080) is the single entry point. It routes only OpenAI/Anthropic-
 # compatible /v1/* paths (it 404s on Ollama-native /api/*), so the local client
 # talks /v1/embeddings + /v1/chat/completions, and keeps the Ollama daemon and
 # deepseek-v4-flash in an exclusive swap group — never co-resident in memory.
-# These /v1/* paths also work against a direct Ollama daemon, so OLLAMA_HOST may
+# These /v1/* paths also work against a direct Ollama daemon, so LLAMASWAP_HOST may
 # be pointed back at :11434 if llama-swap isn't running.
 RAG_GEN_MODEL=qwen3.6:35b-a3b-q8_0
 RAG_JUDGE_MODEL=qwen3.6:35b-a3b-q8_0
 RAG_EMBED_MODEL=embeddinggemma:latest
 RAG_EMBED_DIM=768
-OLLAMA_HOST=http://localhost:28080           # llama-swap endpoint
+LLAMASWAP_HOST=http://localhost:28080        # llama-swap endpoint
 RAG_LOCAL_API=openai                         # "openai" (/v1/chat/completions) | "anthropic" (/v1/messages, ds4 only)
 
 # Chunking (dynamic — splits on paragraph/heading boundaries)

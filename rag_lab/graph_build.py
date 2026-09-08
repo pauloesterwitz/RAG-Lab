@@ -14,7 +14,7 @@ from typing import Callable, Optional
 import networkx as nx
 
 from .config import INDEX_DIR, SETTINGS
-from .ollama_client import generate, generate_many
+from .llamaswap_client import generate, generate_many
 from .store import BaseIndex
 
 GRAPH_DIR = INDEX_DIR / "graph"

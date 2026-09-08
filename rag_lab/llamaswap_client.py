@@ -1,7 +1,7 @@
-"""Local-provider HTTP client: embeddings + generation against an OpenAI/Anthropic-
-compatible endpoint, with a thread-pool helper for concurrent calls.
+"""Local llama-swap HTTP client: embeddings + generation against llama-swap's
+OpenAI/Anthropic-compatible endpoint, with a thread-pool helper for concurrent calls.
 
-Targets SETTINGS.ollama_host (default: llama-swap at :28080). llama-swap only
+Targets SETTINGS.llamaswap_host (default: llama-swap at :28080). llama-swap only
 routes /v1/* paths — it 404s on Ollama-native /api/* — so this client speaks:
 
   * embeddings  -> POST /v1/embeddings              (OpenAI-style; always)
@@ -54,7 +54,7 @@ def _post_with_retry(path: str, payload: dict) -> dict:
     for attempt in range(_RETRIES):
         try:
             with httpx.Client(timeout=_TIMEOUT) as client:
-                r = client.post(f"{SETTINGS.ollama_host}{path}", json=payload)
+                r = client.post(f"{SETTINGS.llamaswap_host}{path}", json=payload)
                 r.raise_for_status()
                 return r.json()
         except Exception as e:  # noqa
@@ -206,7 +206,7 @@ def list_models() -> list[str]:
     by name even though /v1/models doesn't enumerate them."""
     try:
         with httpx.Client(timeout=httpx.Timeout(15.0)) as client:
-            r = client.get(f"{SETTINGS.ollama_host}/v1/models")
+            r = client.get(f"{SETTINGS.llamaswap_host}/v1/models")
             r.raise_for_status()
             return [m["id"] for m in r.json().get("data", [])]
     except Exception:

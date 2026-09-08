@@ -1,4 +1,4 @@
-"""rag_lab — a research lab comparing RAG approaches over local Ollama models.
+"""rag_lab — a research lab comparing RAG approaches over local models served via llama-swap.
 
 Approaches: plain, rerank, agentic, graph, corrective (CRAG), hyde.
 Evaluation: DeepEval (Answer Relevancy, Faithfulness, Contextual Relevancy/

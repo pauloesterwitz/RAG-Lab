@@ -1,4 +1,4 @@
-"""DeepEval judge + embedder implementations for both the Claude API and Ollama.
+"""DeepEval judge + embedder implementations for both the Claude API and llama-swap.
 
 Use get_judge() / get_embedder() to get the right implementation for the
 current RAG_PROVIDER setting instead of instantiating the classes directly."""
@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from deepeval.models import DeepEvalBaseLLM, DeepEvalBaseEmbeddingModel
 
 from ..config import SETTINGS
-from ..ollama_client import generate as ollama_generate, embed_one, embed_many
+from ..llamaswap_client import generate as llamaswap_generate, embed_one, embed_many
 
 _JSON_RE = re.compile(r"\{.*\}", re.S)
 
@@ -41,7 +41,7 @@ def _coerce(raw: str, schema: type[BaseModel]) -> BaseModel:
         raise
 
 
-class OllamaJudge(DeepEvalBaseLLM):
+class LlamaSwapJudge(DeepEvalBaseLLM):
     def __init__(self, model: Optional[str] = None, num_ctx: Optional[int] = None):
         self.model_name = model or SETTINGS.judge_model
         # Match the generation num_ctx exactly: a single context size means Ollama
@@ -53,7 +53,7 @@ class OllamaJudge(DeepEvalBaseLLM):
         return self
 
     def get_model_name(self) -> str:
-        return f"ollama:{self.model_name}"
+        return f"llamaswap:{self.model_name}"
 
     def generate(
         self, prompt: str, schema: Optional[type[BaseModel]] = None
@@ -62,7 +62,7 @@ class OllamaJudge(DeepEvalBaseLLM):
         # (schema instance or str) — the (result, cost) tuple is only for
         # native models. Returning a tuple breaks metrics + the synthesizer.
         fmt = schema.model_json_schema() if schema is not None else None
-        raw = ollama_generate(
+        raw = llamaswap_generate(
             prompt,
             model=self.model_name,
             fmt=fmt,
@@ -80,7 +80,7 @@ class OllamaJudge(DeepEvalBaseLLM):
         return await _run(self.generate, prompt, schema)
 
 
-class OllamaEmbedder(DeepEvalBaseEmbeddingModel):
+class LlamaSwapEmbedder(DeepEvalBaseEmbeddingModel):
     def __init__(self, model: Optional[str] = None):
         self.model_name = model or SETTINGS.embed_model
 
@@ -88,7 +88,7 @@ class OllamaEmbedder(DeepEvalBaseEmbeddingModel):
         return self
 
     def get_model_name(self) -> str:
-        return f"ollama:{self.model_name}"
+        return f"llamaswap:{self.model_name}"
 
     def embed_text(self, text: str) -> list[float]:
         return embed_one(text, role="document", model=self.model_name)
@@ -136,7 +136,7 @@ class ClaudeJudge(DeepEvalBaseLLM):
     def generate(
         self, prompt: str, schema: Optional[type[BaseModel]] = None
     ) -> Union[str, BaseModel]:
-        # NOTE: must return the BARE result (not a tuple) — see OllamaJudge note above.
+        # NOTE: must return the BARE result (not a tuple) — see LlamaSwapJudge note above.
         # All calls go through with_retry, which acquires the shared org-wide rate
         # limiter and retries on 429/overload — so a judge call is never lost to a 429.
         from ..claude_client import with_retry
@@ -210,10 +210,10 @@ class STEmbedder(DeepEvalBaseEmbeddingModel):
 def get_judge() -> DeepEvalBaseLLM:
     if SETTINGS.provider == "claude":
         return ClaudeJudge()
-    return OllamaJudge()
+    return LlamaSwapJudge()
 
 
 def get_embedder() -> DeepEvalBaseEmbeddingModel:
     if SETTINGS.provider == "claude":
         return STEmbedder()
-    return OllamaEmbedder()
+    return LlamaSwapEmbedder()
