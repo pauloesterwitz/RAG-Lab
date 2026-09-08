@@ -94,6 +94,13 @@ class Settings:
     graph_max_chunks: int = int(os.environ.get("RAG_GRAPH_MAX_CHUNKS", "0"))  # 0 = all chunks (full coverage)
     graph_concurrency: int = int(os.environ.get("RAG_GRAPH_CONCURRENCY", "6"))
 
+    # --- PageIndex ---
+    pageindex_model: str = os.environ.get("RAG_PAGEINDEX_MODEL", "claude-sonnet-4-6")
+    pageindex_max_depth: int = int(os.environ.get("RAG_PAGEINDEX_MAX_DEPTH", "4"))
+    pageindex_max_breadth: int = int(os.environ.get("RAG_PAGEINDEX_MAX_BREADTH", "2"))  # children descended per hop
+    pageindex_max_docs: int = int(os.environ.get("RAG_PAGEINDEX_MAX_DOCS", "3"))        # root-level fan-out cap
+    pageindex_summary_chars: int = int(os.environ.get("RAG_PAGEINDEX_SUMMARY_CHARS", "1200"))
+
     # --- Concurrency ---
     embed_concurrency: int = int(os.environ.get("RAG_EMBED_CONCURRENCY", "6"))
     gen_concurrency: int = int(os.environ.get("RAG_GEN_CONCURRENCY", "4"))
@@ -138,6 +145,10 @@ APPROACHES = {
         "label": "GraphRAG",
         "description": "LLM entity/relation graph + community summaries; entity-anchored retrieval.",
     },
+    "pageindex": {
+        "label": "PageIndex",
+        "description": "Hierarchical tree index (ToC/heading-derived); LLM navigates the tree structurally instead of vector similarity.",
+    },
 }
 
-APPROACH_ORDER = ["plain", "rerank", "hyde", "corrective", "agentic", "graph"]
+APPROACH_ORDER = ["plain", "rerank", "hyde", "corrective", "agentic", "graph", "pageindex"]

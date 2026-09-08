@@ -343,13 +343,39 @@ def graph_rag():
     draw_diagram("graph_rag", "Graph RAG (Community + Entity Subgraph)", nodes, edges)
 
 
+def pageindex_rag():
+    nodes = [
+        {"id": "Query",                          "pos": (5.0, 8.3), "type": "input"},
+        {"id": "Root Selection\n(doc summaries)", "pos": (5.0, 6.9), "type": "retrieval"},
+        {"id": "LLM: Choose\nSubsection",         "pos": (5.0, 5.5), "type": "agent"},
+        {"id": "Leaf or\nStop Here?",             "pos": (5.0, 4.1), "type": "decision"},
+        {"id": "Descend to\nChild Node",          "pos": (8.2, 5.5), "type": "agent"},
+        {"id": "Chunk Set\n(page-range mapped)",  "pos": (2.2, 2.8), "type": "retrieval"},
+        {"id": "Dense Tie-break\n(display order)","pos": (2.2, 1.4), "type": "intermediate"},
+        {"id": "LLM\n(qwen3.6:35b)",       "pos": (5.5, 0.5), "type": "generation"},
+        {"id": "Answer (cited)",                  "pos": (8.5, 0.5), "type": "output"},
+    ]
+    edges = [
+        {"src": "Query",                           "dst": "Root Selection\n(doc summaries)", "label": ""},
+        {"src": "Root Selection\n(doc summaries)", "dst": "LLM: Choose\nSubsection",         "label": ""},
+        {"src": "LLM: Choose\nSubsection",         "dst": "Leaf or\nStop Here?",             "label": ""},
+        {"src": "Leaf or\nStop Here?",             "dst": "Descend to\nChild Node",          "label": "no, descend"},
+        {"src": "Descend to\nChild Node",          "dst": "LLM: Choose\nSubsection",         "label": "retry deeper"},
+        {"src": "Leaf or\nStop Here?",             "dst": "Chunk Set\n(page-range mapped)",  "label": "yes, leaf/stop"},
+        {"src": "Chunk Set\n(page-range mapped)",  "dst": "Dense Tie-break\n(display order)","label": ""},
+        {"src": "Dense Tie-break\n(display order)","dst": "LLM\n(qwen3.6:35b)",       "label": "top-k context"},
+        {"src": "LLM\n(qwen3.6:35b)",        "dst": "Answer (cited)",                 "label": ""},
+    ]
+    draw_diagram("pageindex_rag", "PageIndex (Hierarchical Tree Navigation)", nodes, edges)
+
+
 # ===========================================================================
 # Main
 # ===========================================================================
 
 if __name__ == "__main__":
     print("Generating RAG pipeline diagrams…")
-    for fn in (plain_rag, rerank_rag, hyde_rag, corrective_rag, agentic_rag, graph_rag):
+    for fn in (plain_rag, rerank_rag, hyde_rag, corrective_rag, agentic_rag, graph_rag, pageindex_rag):
         print(f"\n[{fn.__name__}]")
         fn()
     print("\nDone.")

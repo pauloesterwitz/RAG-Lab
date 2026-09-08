@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from ..config import SETTINGS, APPROACHES, APPROACH_ORDER, DOCUMENTS_DIR, ROOT
 from ..indexer import build_index, load_base_index, get_manifest, invalidate_cache
 from ..graph_build import build_graph, get_graph_meta, graph_exists
+from ..pageindex_build import build_pageindex_trees, get_pageindex_meta, pageindex_exists
 from ..ingest import list_pdfs
 from ..llamaswap_client import list_models
 from ..reranker import backend_name
@@ -46,6 +47,7 @@ app.add_middleware(
 # --- models ---------------------------------------------------------------
 class ReembedReq(BaseModel):
     rebuild_graph: bool = True
+    rebuild_pageindex: bool = True
 
 
 class SynthReq(BaseModel):
@@ -85,6 +87,8 @@ def status():
         "index": manifest,
         "graph": get_graph_meta(),
         "graph_built": graph_exists(),
+        "pageindex": get_pageindex_meta(),
+        "pageindex_built": pageindex_exists(),
         "goldens": (load_goldens() or {}).get("num_goldens", 0),
         "has_results": load_results() is not None,
         "models": {
@@ -124,6 +128,10 @@ def reembed(req: ReembedReq):
             job.log.append("Building knowledge graph for GraphRAG…")
             idx = load_base_index(refresh=True)
             out["graph"] = build_graph(idx, progress=_frac_progress(job))
+        if req.rebuild_pageindex:
+            job.log.append("Building tree index for PageIndex…")
+            idx = load_base_index(refresh=True)
+            out["pageindex"] = build_pageindex_trees(idx, progress=_frac_progress(job))
         return out
 
     try:
@@ -166,6 +174,7 @@ def full(req: SynthReq):
         invalidate_cache()
         idx = load_base_index(refresh=True)
         build_graph(idx, progress=_frac_progress(job))
+        build_pageindex_trees(idx, progress=_frac_progress(job))
         job.progress = -1.0
         synthesize_goldens(num=req.num, progress=_msg_progress(job))
         return run_full_eval(progress=_msg_progress(job))

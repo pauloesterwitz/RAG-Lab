@@ -4,6 +4,7 @@ reuses the same underlying functions, so CLI and UI stay in lock-step.
 Usage:
     python -m rag_lab.cli embed        # (re)embed Documents -> base index
     python -m rag_lab.cli graph        # build the GraphRAG entity graph
+    python -m rag_lab.cli pageindex    # build the PageIndex tree index
     python -m rag_lab.cli synth [-n N]  # synthesize goldens
     python -m rag_lab.cli eval [-a ...] # run DeepEval over approaches
     python -m rag_lab.cli all [-n N]    # embed + graph + synth + eval
@@ -18,6 +19,7 @@ import sys
 from .config import SETTINGS, APPROACH_ORDER
 from .indexer import build_index, load_base_index, get_manifest
 from .graph_build import build_graph, get_graph_meta
+from .pageindex_build import build_pageindex_trees, get_pageindex_meta
 from .eval.synthesize import synthesize_goldens, load_goldens
 from .eval.run_eval import run_full_eval, load_results
 
@@ -37,6 +39,12 @@ def cmd_graph(args):
     _p(json.dumps(m, indent=2))
 
 
+def cmd_pageindex(args):
+    idx = load_base_index(refresh=True)
+    m = build_pageindex_trees(idx, progress=lambda s, f, msg: _p(f"[pageindex {f*100:5.1f}%] {msg}"))
+    _p(json.dumps(m, indent=2))
+
+
 def cmd_synth(args):
     payload = synthesize_goldens(num=args.num, progress=_p)
     _p(f"Synthesized {payload['num_goldens']} goldens.")
@@ -53,6 +61,7 @@ def cmd_eval(args):
 def cmd_all(args):
     cmd_embed(args)
     cmd_graph(args)
+    cmd_pageindex(args)
     cmd_synth(args)
     cmd_eval(args)
 
@@ -60,6 +69,7 @@ def cmd_all(args):
 def cmd_status(args):
     _p("== Base index ==");  _p(json.dumps(get_manifest(), indent=2))
     _p("== Graph ==");       _p(json.dumps(get_graph_meta(), indent=2))
+    _p("== PageIndex ==");   _p(json.dumps(get_pageindex_meta(), indent=2))
     g = load_goldens();      _p(f"== Goldens == {g['num_goldens'] if g else 0}")
     r = load_results()
     if r:
@@ -73,6 +83,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("embed").set_defaults(func=cmd_embed)
     sub.add_parser("graph").set_defaults(func=cmd_graph)
+    sub.add_parser("pageindex").set_defaults(func=cmd_pageindex)
     sp = sub.add_parser("synth"); sp.add_argument("-n", "--num", type=int, default=None); sp.set_defaults(func=cmd_synth)
     ep = sub.add_parser("eval"); ep.add_argument("-a", "--approaches", nargs="*", default=None); ep.set_defaults(func=cmd_eval)
     al = sub.add_parser("all"); al.add_argument("-n", "--num", type=int, default=None); al.add_argument("-a", "--approaches", nargs="*", default=None); al.set_defaults(func=cmd_all)
