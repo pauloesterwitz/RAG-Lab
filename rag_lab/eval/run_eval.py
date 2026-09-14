@@ -83,6 +83,12 @@ def _run_approach_outputs(approach_name: str, goldens: list[dict], index, progre
         retrieved_ids = [c.chunk.id for c in res.contexts]
         retrieved_docs = {c.chunk.doc for c in res.contexts}
         gold_ids = set(g.get("gold_chunk_ids", []))
+        # Multi-hop goldens' source_file is a literal "docA.pdf + docB.pdf" (DeepEval's
+        # synthesizer always pairs two docs) — exact-matching that whole string against
+        # individual retrieved doc names was structurally always False for every
+        # multi-hop golden, for every approach. Split and use set intersection instead;
+        # degrades to the original single-doc check for single-hop goldens.
+        gold_docs = {d.strip() for d in (g.get("source_file") or "").split(" + ") if d.strip()}
         case = LLMTestCase(
             input=g["input"],
             actual_output=res.answer,
@@ -96,7 +102,7 @@ def _run_approach_outputs(approach_name: str, goldens: list[dict], index, progre
             "context_chars": sum(len(t) for t in res.context_texts()),
             "hop": g.get("hop", "single"),
             "gold_chunk_hit": bool(gold_ids & set(retrieved_ids)),
-            "gold_doc_hit": g.get("source_file") in retrieved_docs,
+            "gold_doc_hit": bool(gold_docs & retrieved_docs),
             "retrieved": [c.to_dict() for c in res.contexts],
             "answer": res.answer,
             "trace": [t.to_dict() for t in res.trace],

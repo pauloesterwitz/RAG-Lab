@@ -28,6 +28,16 @@ META_FILE = PAGEINDEX_DIR / "meta.json"
 
 _MIN_HEADING_CANDIDATES = 3
 _HEADING_SIZE_RATIO = 1.15
+# Large-font copyright/license text reads as a heading candidate by size alone —
+# observed collapsing a doc's real content into one node with license-text-fragment
+# "children" (Types of Machine Learning Algorithms.pdf). Filter before bucketing so
+# boilerplate can't skew which sizes get picked as heading levels.
+_BOILERPLATE_RE = re.compile(
+    r"©|\ball rights reserved\b|\blicense[ds]?\b|\bterms of\b|\bshare-?alike\b|\bcc[- ]by\b"
+    r"|\bcreative commons\b|\bnon-?commercial\b|\bdistributed under\b|\bpermits use\b",
+    re.IGNORECASE,
+)
+_MIN_HEADING_CHARS = 3  # drop drop-caps/decorative single letters ("X") a font-size pass mistakes for a heading
 _MAX_HEADING_CHARS = 120
 
 
@@ -104,13 +114,28 @@ def _heuristic_entries(pdf_path: Path) -> list[tuple[int, str, int]]:
     threshold = body_size * _HEADING_SIZE_RATIO
     candidates = [
         (pno, size, text) for pno, size, text in spans
-        if size >= threshold and len(text) <= _MAX_HEADING_CHARS and not text.isdigit()
+        if size >= threshold and _MIN_HEADING_CHARS <= len(text) <= _MAX_HEADING_CHARS
+        and not text.isdigit() and not _BOILERPLATE_RE.search(text)
     ]
     if len(candidates) < _MIN_HEADING_CANDIDATES:
         return []
     distinct_sizes = sorted({s for _, s, _ in candidates}, reverse=True)[:3]
     level_of = {s: i + 1 for i, s in enumerate(distinct_sizes)}
-    return [(level_of[size], text, pno) for pno, size, text in candidates if size in level_of]
+    entries = [(level_of[size], text, pno) for pno, size, text in candidates if size in level_of]
+
+    # Merge line-wrapped headings: a heading spanning two PDF lines becomes two
+    # same-page, same-level candidate spans — one real section torn into two
+    # siblings (observed: "Chapter 12: Exception Handling and" / "Recovery",
+    # same page, Agentic_Design_Patterns.pdf). If a candidate has no terminal
+    # punctuation and the next one is the same page/level, it's a continuation.
+    merged: list[tuple[int, str, int]] = []
+    for level, text, pno in entries:
+        prev = merged[-1] if merged else None
+        if prev and prev[0] == level and prev[2] == pno and not re.search(r"[.!?:]$", prev[1]):
+            merged[-1] = (level, f"{prev[1]} {text}", pno)
+        else:
+            merged.append((level, text, pno))
+    return merged
 
 
 def _build_hierarchy(doc_name: str, doc_slug: str, entries: list[tuple[int, str, int]], page_count: int) -> PITree:

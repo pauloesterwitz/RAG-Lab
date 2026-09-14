@@ -125,14 +125,16 @@ class PageIndexRAG(Approach):
             "flips to the right section using a table of contents.\n\n"
             f'Current section: "{node.title}" — {node.summary[:200]}\n\nSubsections:\n{options}\n\n'
             f"Question: {query}\n\n"
-            "Pick up to 2 subsections worth descending into, OR say this section itself already "
-            'answers it (stop_here=true, selected=[]). Reply JSON: '
+            "For EACH subsection, judge whether it's worth descending into to answer the question, "
+            "or say this section itself already answers it (stop_here=true, selected=[]). Reply JSON: "
             '{"selected": ["<id>", ...], "stop_here": true|false}'
         )
         try:
-            # Same truncation risk as root selection, smaller (no "reason" field here).
+            # Same truncation risk as root selection, smaller (no "reason" field here) but
+            # still scales with child count for the same reason.
+            budget = max(600, 100 * len(node.children) + 200)
             data = json.loads(generate(
-                prompt, model=SETTINGS.pageindex_model, fmt=_DESCEND_SCHEMA, num_predict=600, temperature=0.0,
+                prompt, model=SETTINGS.pageindex_model, fmt=_DESCEND_SCHEMA, num_predict=budget, temperature=0.0,
             ))
             selected = [cid for cid in data.get("selected", []) if cid in tree.nodes][: SETTINGS.pageindex_max_breadth]
             stop_here = bool(data.get("stop_here", False)) or not selected
@@ -170,6 +172,44 @@ class PageIndexRAG(Approach):
         scored.sort(key=lambda x: x[1], reverse=True)
         return [cid for cid, _ in scored[: SETTINGS.top_k]]
 
+    def _merge_with_doc_floor(self, chunk_ids: list[str], dense: np.ndarray) -> list[tuple[str, float]]:
+        """Final cross-location merge, with a per-document floor. A flat global
+        top_k cut over every navigated document's candidates let one document's
+        higher raw dense scores fully starve another — measured directly: of
+        multi-hop cases where both gold documents were correctly navigated, over
+        half still had one document's chunks completely zeroed out of the final
+        top_k. Reserve floor = max(1, top_k // n_docs) slots per document (best
+        chunks first, by the same dense score), then fill any remaining slots by
+        global rank over what's left. structure still decided the candidate
+        pool; this only changes how the top_k budget is split across it."""
+        by_doc: dict[str, list[tuple[str, float]]] = {}
+        for cid in chunk_ids:
+            if cid not in self._pos_by_id:
+                continue
+            doc = self._chunk_by_id[cid].doc
+            by_doc.setdefault(doc, []).append((cid, float(dense[self._pos_by_id[cid]])))
+        for scored in by_doc.values():
+            scored.sort(key=lambda x: x[1], reverse=True)
+
+        floor = max(1, SETTINGS.top_k // len(by_doc)) if by_doc else 0
+        top: list[tuple[str, float]] = []
+        used: set[str] = set()
+        for scored in by_doc.values():
+            for cid, score in scored[:floor]:
+                top.append((cid, score))
+                used.add(cid)
+
+        remaining = SETTINGS.top_k - len(top)
+        if remaining > 0:
+            leftover = sorted(
+                (pair for scored in by_doc.values() for pair in scored if pair[0] not in used),
+                key=lambda x: x[1], reverse=True,
+            )
+            top.extend(leftover[:remaining])
+
+        top.sort(key=lambda x: x[1], reverse=True)
+        return top[: SETTINGS.top_k]
+
     # --- resilience: never worse than plain hybrid ----------------------------
     def _hybrid_fallback(self, query: str, trace: list[TraceStep], reason: str) -> list[RetrievedChunk]:
         trace.append(TraceStep(reason, "hybrid retrieval only"))
@@ -206,11 +246,7 @@ class PageIndexRAG(Approach):
         if not gathered_ids:
             return self._hybrid_fallback(query, trace, "Tree navigation returned nothing")
 
-        scored = sorted(
-            ((cid, float(dense[self._pos_by_id[cid]])) for cid in gathered_ids if cid in self._pos_by_id),
-            key=lambda x: x[1], reverse=True,
-        )
-        top = scored[: SETTINGS.top_k]
+        top = self._merge_with_doc_floor(gathered_ids, dense)
         trace.append(TraceStep("Final ranking",
                                 f"{len(gathered_ids)} candidates from structure → top {len(top)} by similarity"))
         return [RetrievedChunk(self._chunk_by_id[cid], s, "pageindex") for cid, s in top]
