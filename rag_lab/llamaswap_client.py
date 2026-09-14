@@ -26,7 +26,13 @@ import httpx
 from .config import SETTINGS
 
 _TIMEOUT = httpx.Timeout(600.0, connect=10.0)
-_RETRIES = 3
+# A member cold-load (esp. an SSH-tunneled Kathryn one) can take 50-60s, but a
+# 502/503 while it's starting comes back FAST — the old 3-retry/~7s-total budget
+# exhausted long before that, and a burst of concurrent requests (e.g. embed_many's
+# thread pool) all raced the same cold start and all lost (observed 2026-09-14: a
+# fresh embed_many against nomic-embed-text-kathryn failed outright). 20 retries
+# with the same capped exponential backoff gives ~2-3 min of headroom.
+_RETRIES = 20
 
 # Over the /v1 wire, neither response_format nor Ollama's native `format` field
 # reliably constrains output — models wrap JSON in ``` fences or prose. Callers
