@@ -63,17 +63,6 @@ class PageIndexRAG(Approach):
             tree = load_tree(doc)
             if tree is not None:
                 self._trees[doc] = tree
-        # Precompute each doc's root-summary embedding once (cheap, local) — used
-        # only as the fallback ranking in _select_documents when the LLM judgment
-        # comes back empty (observed on real multi-hop questions: the model
-        # sometimes marks nothing relevant even though a document clearly applies).
-        self._doc_vecs: dict[str, list[float]] = {}
-        for doc, info in self._doc_summaries.items():
-            text = f"{info.get('title') or doc}. {info.get('summary', '')}"
-            try:
-                self._doc_vecs[doc] = embed_one(text, role="document")
-            except Exception:
-                pass
 
     # --- root-level document fan-out (also the multi-hop mechanism: this one
     # call can mark >1 doc relevant, each navigated independently below) -----
@@ -109,26 +98,20 @@ class PageIndexRAG(Approach):
             ))
         except Exception:
             trace.append(TraceStep("Root selection", "parse failed"))
-        if not picked:
-            # Empty (LLM found nothing relevant, or parsing failed): fall back to
-            # ranking documents by embedding similarity to their root summary,
-            # rather than abandoning structural navigation for full hybrid search.
-            picked = self._rank_docs_by_similarity(query)
-            trace.append(TraceStep("Root selection fallback", f"embedding-ranked: {', '.join(picked) or '(none)'}"))
+        # REVERTED 2026-09-14: an embedding-based document-summary fallback used to
+        # live here for the "found nothing relevant" case. A/B'd against the exact
+        # same 100 goldens: it made things WORSE (composite 0.659->0.627, gold-chunk
+        # hit 50%->45%), because it's strictly weaker than the retrieve()-level
+        # _hybrid_fallback below — no BM25/keyword signal, only a coarse per-document
+        # summary embedding instead of per-chunk, and no recovery once it commits to
+        # the wrong 1-2 documents. Traced multiple regressed cases directly to this:
+        # e.g. "Which background service runs while Eppie CLI hangs..." — gold doc
+        # is "Agents of Chaos.pdf", full hybrid search found it via keyword match,
+        # this fallback instead picked HyperAgents + Chollet's book by theme and
+        # never recovered. So: an empty `picked` now falls straight through to
+        # retrieve()'s _hybrid_fallback (full corpus, hybrid search), same as before
+        # this approach existed — that IS the better fallback for this failure mode.
         return picked[: SETTINGS.pageindex_max_docs]
-
-    def _rank_docs_by_similarity(self, query: str) -> list[str]:
-        if not self._doc_vecs:
-            return []
-        qv = np.asarray(embed_one(query, role="query"), dtype=np.float32)
-        qv = qv / (np.linalg.norm(qv) or 1.0)
-        scored = []
-        for doc, v in self._doc_vecs.items():
-            dv = np.asarray(v, dtype=np.float32)
-            dv = dv / (np.linalg.norm(dv) or 1.0)
-            scored.append((doc, float(qv @ dv)))
-        scored.sort(key=lambda x: x[1], reverse=True)
-        return [d for d, _ in scored[:2]]
 
     # --- per-hop tree descent -------------------------------------------------
     def _choose_children(self, query: str, tree: PITree, node, trace: list[TraceStep], doc: str) -> list[str]:
