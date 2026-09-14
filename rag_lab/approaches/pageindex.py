@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 
+import numpy as np
+
 from .base import Approach, RetrievedChunk, TraceStep
 from ..config import SETTINGS
 from ..llamaswap_client import embed_one, generate
@@ -61,6 +63,17 @@ class PageIndexRAG(Approach):
             tree = load_tree(doc)
             if tree is not None:
                 self._trees[doc] = tree
+        # Precompute each doc's root-summary embedding once (cheap, local) — used
+        # only as the fallback ranking in _select_documents when the LLM judgment
+        # comes back empty (observed on real multi-hop questions: the model
+        # sometimes marks nothing relevant even though a document clearly applies).
+        self._doc_vecs: dict[str, list[float]] = {}
+        for doc, info in self._doc_summaries.items():
+            text = f"{info.get('title') or doc}. {info.get('summary', '')}"
+            try:
+                self._doc_vecs[doc] = embed_one(text, role="document")
+            except Exception:
+                pass
 
     # --- root-level document fan-out (also the multi-hop mechanism: this one
     # call can mark >1 doc relevant, each navigated independently below) -----
@@ -71,10 +84,14 @@ class PageIndexRAG(Approach):
         )
         prompt = (
             "You are choosing which documents to search to answer a question, based only on "
-            "each document's title and summary (like scanning a library shelf).\n\n"
+            "each document's title and summary (like scanning a library shelf). Some questions "
+            "combine information from TWO OR MORE documents — mark EVERY document that could "
+            "plausibly contribute PART of the answer, not just the single closest match. When "
+            "genuinely unsure, mark a document relevant rather than excluding it.\n\n"
             f"Documents:\n{listing}\n\nQuestion: {query}\n\n"
             'Reply JSON: {"documents": [{"doc": "<exact name>", "relevant": true|false, "reason": ".."}]}'
         )
+        picked: list[str] = []
         try:
             # Scales with doc count: some local models write a verbose "reason" per
             # entry, and a too-tight budget truncates mid-string -> invalid JSON
@@ -91,9 +108,27 @@ class PageIndexRAG(Approach):
                           if d.get("relevant")) or "(none relevant)",
             ))
         except Exception:
-            picked = list(self._doc_summaries)
-            trace.append(TraceStep("Root selection", "parse failed — searching all documents"))
+            trace.append(TraceStep("Root selection", "parse failed"))
+        if not picked:
+            # Empty (LLM found nothing relevant, or parsing failed): fall back to
+            # ranking documents by embedding similarity to their root summary,
+            # rather than abandoning structural navigation for full hybrid search.
+            picked = self._rank_docs_by_similarity(query)
+            trace.append(TraceStep("Root selection fallback", f"embedding-ranked: {', '.join(picked) or '(none)'}"))
         return picked[: SETTINGS.pageindex_max_docs]
+
+    def _rank_docs_by_similarity(self, query: str) -> list[str]:
+        if not self._doc_vecs:
+            return []
+        qv = np.asarray(embed_one(query, role="query"), dtype=np.float32)
+        qv = qv / (np.linalg.norm(qv) or 1.0)
+        scored = []
+        for doc, v in self._doc_vecs.items():
+            dv = np.asarray(v, dtype=np.float32)
+            dv = dv / (np.linalg.norm(dv) or 1.0)
+            scored.append((doc, float(qv @ dv)))
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [d for d, _ in scored[:2]]
 
     # --- per-hop tree descent -------------------------------------------------
     def _choose_children(self, query: str, tree: PITree, node, trace: list[TraceStep], doc: str) -> list[str]:
@@ -127,17 +162,30 @@ class PageIndexRAG(Approach):
                                 ", ".join(tree.nodes[c].title for c in selected)))
         return selected
 
-    def _navigate(self, query: str, tree: PITree, node, trace: list[TraceStep], doc: str, depth: int = 0) -> list[str]:
+    def _navigate(self, query: str, tree: PITree, node, trace: list[TraceStep], doc: str,
+                  dense: np.ndarray, depth: int = 0) -> list[str]:
         if not node.children or depth >= SETTINGS.pageindex_max_depth:
             trace.append(TraceStep(f"[{doc}] Leaf: {node.title}", f"p.{node.page_start}-{node.page_end}"))
-            return node.chunk_ids
+            return self._top_chunks(node.chunk_ids, dense)
         selected = self._choose_children(query, tree, node, trace, doc)
         if not selected:
-            return node.chunk_ids
+            return self._top_chunks(node.chunk_ids, dense)
         gathered: list[str] = []
         for cid in selected:
-            gathered.extend(self._navigate(query, tree, tree.nodes[cid], trace, doc, depth + 1))
+            gathered.extend(self._navigate(query, tree, tree.nodes[cid], trace, doc, dense, depth + 1))
         return gathered
+
+    def _top_chunks(self, chunk_ids: list[str], dense: np.ndarray) -> list[str]:
+        """Cap ONE navigated location's contribution to the candidate pool by its
+        own top-k dense similarity, before it's merged with other locations. A
+        broad stop/leaf node (a whole section) would otherwise dump every one of
+        its chunks into the pool, diluting the final top-k with off-topic
+        siblings — structure still decided *which locations* to visit; this only
+        trims *within* a location, same "structure picks candidates, similarity
+        only orders/trims" split as the final ranking step below."""
+        scored = [(cid, float(dense[self._pos_by_id[cid]])) for cid in chunk_ids if cid in self._pos_by_id]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [cid for cid, _ in scored[: SETTINGS.top_k]]
 
     # --- resilience: never worse than plain hybrid ----------------------------
     def _hybrid_fallback(self, query: str, trace: list[TraceStep], reason: str) -> list[RetrievedChunk]:
@@ -154,13 +202,20 @@ class PageIndexRAG(Approach):
         if not docs:
             return self._hybrid_fallback(query, trace, "No document selected")
 
+        # Computed once up front: used both to cap each navigated location's own
+        # contribution (_navigate -> _top_chunks) and for the final cross-location
+        # ranking below — structure decides *where* to look, this decides *what
+        # from there* and *what order*.
+        qvec = embed_one(query, role="query")
+        dense = self.index.dense_scores(qvec)
+
         gathered_ids: list[str] = []
         seen: set[str] = set()
         for doc in docs:
             tree = self._trees.get(doc)
             if tree is None:
                 continue
-            for cid in self._navigate(query, tree, tree.nodes[tree.root_id], trace, doc):
+            for cid in self._navigate(query, tree, tree.nodes[tree.root_id], trace, doc, dense):
                 if cid not in seen:
                     seen.add(cid)
                     gathered_ids.append(cid)
@@ -168,9 +223,6 @@ class PageIndexRAG(Approach):
         if not gathered_ids:
             return self._hybrid_fallback(query, trace, "Tree navigation returned nothing")
 
-        # structure decided the candidates; a cheap dense tie-break decides display order
-        qvec = embed_one(query, role="query")
-        dense = self.index.dense_scores(qvec)
         scored = sorted(
             ((cid, float(dense[self._pos_by_id[cid]])) for cid in gathered_ids if cid in self._pos_by_id),
             key=lambda x: x[1], reverse=True,
