@@ -1,14 +1,19 @@
-"""Local llama-swap HTTP client: generation against llama-swap's OpenAI/Anthropic-
-compatible endpoint, with a thread-pool helper for concurrent calls.
+"""Local llama-swap HTTP client: embeddings + generation against llama-swap's
+OpenAI/Anthropic-compatible endpoint, with a thread-pool helper for concurrent calls.
 
 Targets SETTINGS.llamaswap_host (default: llama-swap at :28080). llama-swap only
-routes /v1/* paths — it 404s on Ollama-native /api/* — so generation speaks:
+routes /v1/* paths — it 404s on Ollama-native /api/* — so this client speaks:
 
-  * POST /v1/chat/completions   (SETTINGS.local_api_style="openai", default)
-  * POST /v1/messages           (SETTINGS.local_api_style="anthropic")
+  * embeddings  -> POST /v1/embeddings              (OpenAI-style; always)
+  * generation  -> POST /v1/chat/completions        (SETTINGS.local_api_style="openai")
+                or POST /v1/messages                 (SETTINGS.local_api_style="anthropic")
 
-Embeddings do NOT go through llama-swap (see below) — this module only handles
-generation over HTTP."""
+Embedding member placement matters: a plain local embed member competes for GPU
+memory with whatever big model is pinned on THIS node and can CUDA-OOM under
+normal pool pressure (observed 2026-09-14 against qwen38fn-sglang-tp2-starfleet).
+nomic-embed-text-kathryn (added the same day, see llama-swap/config.yaml) runs
+the identical server on Kathryn's pool instead via serve-kathryn-embed.sh — set
+RAG_EMBED_MODEL=nomic-embed-text-kathryn to use it."""
 from __future__ import annotations
 
 import concurrent.futures as cf
@@ -19,16 +24,6 @@ from typing import Iterable, Optional
 import httpx
 
 from .config import SETTINGS
-
-# ---------------------------------------------------------------------------
-# Embeddings — always local (sentence-transformers, CPU), regardless of
-# RAG_PROVIDER. The Ollama daemon that used to serve embeddinggemma/nomic-embed-text
-# is gone; their vLLM replacements (llama-swap's serve-embed.sh) are GPU-hosted and
-# compete for the same constrained pool as pinned Starfleet models — a CUDA OOM was
-# observed there under normal pool pressure (2026-09-14). sentence-transformers has
-# no server dependency and no GPU contention, so it's the reliable path now.
-# ---------------------------------------------------------------------------
-from .claude_client import embed_one, embed_many  # noqa: F401, E402
 
 _TIMEOUT = httpx.Timeout(600.0, connect=10.0)
 _RETRIES = 3
@@ -69,6 +64,46 @@ def _post_with_retry(path: str, payload: dict) -> dict:
             last = e
             time.sleep(min(2 ** attempt, 8))
     raise RuntimeError(f"Local call to {path} failed after {_RETRIES} attempts: {last}")
+
+
+# --- EmbeddingGemma prompt templates (improve retrieval quality) ------------
+def _embed_prompt(text: str, role: str) -> str:
+    text = text.replace("\n", " ").strip()
+    if "embeddinggemma" in SETTINGS.embed_model:
+        if role == "query":
+            return f"task: search result | query: {text}"
+        return f"title: none | text: {text}"
+    return text
+
+
+def embed_one(text: str, role: str = "document", *, model: Optional[str] = None) -> list[float]:
+    model = model or SETTINGS.embed_model
+    data = _post_with_retry("/v1/embeddings", {"model": model, "input": _embed_prompt(text, role)})
+    return data["data"][0]["embedding"]
+
+
+def embed_many(
+    texts: list[str],
+    role: str = "document",
+    *,
+    model: Optional[str] = None,
+    concurrency: Optional[int] = None,
+    progress=None,
+) -> list[list[float]]:
+    """Embed many texts concurrently. `progress(done, total)` is called as work completes."""
+    model = model or SETTINGS.embed_model
+    concurrency = concurrency or SETTINGS.embed_concurrency
+    results: list[Optional[list[float]]] = [None] * len(texts)
+    done = 0
+    with cf.ThreadPoolExecutor(max_workers=concurrency) as ex:
+        futs = {ex.submit(embed_one, t, role, model=model): i for i, t in enumerate(texts)}
+        for fut in cf.as_completed(futs):
+            i = futs[fut]
+            results[i] = fut.result()
+            done += 1
+            if progress and (done % 5 == 0 or done == len(texts)):
+                progress(done, len(texts))
+    return [r for r in results]  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
@@ -186,14 +221,14 @@ def list_models() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Provider dispatch: when RAG_PROVIDER=claude, replace this module's generation
-# symbols with the Claude implementations (Anthropic SDK -> api.anthropic.com)
-# so no import sites need changing. embed_one/embed_many are NOT swapped here —
-# they're already the (same) sentence-transformers implementation regardless of
-# provider, imported unconditionally above.
+# Provider dispatch: when RAG_PROVIDER=claude, replace this module's public
+# symbols with the Claude implementations (Anthropic SDK -> api.anthropic.com,
+# embeddings via sentence-transformers) so no import sites need changing.
 # ---------------------------------------------------------------------------
 if SETTINGS.provider == "claude":
     from .claude_client import (  # noqa: F401, E402
+        embed_one,
+        embed_many,
         generate,
         generate_many,
         list_models,
