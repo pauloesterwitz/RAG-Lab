@@ -76,8 +76,12 @@ class PageIndexRAG(Approach):
             'Reply JSON: {"documents": [{"doc": "<exact name>", "relevant": true|false, "reason": ".."}]}'
         )
         try:
+            # Scales with doc count: some local models write a verbose "reason" per
+            # entry, and a too-tight budget truncates mid-string -> invalid JSON
+            # (observed with qwen38fn: num_predict=400 truncated on 11 docs; 1500 didn't).
+            budget = max(1500, 150 * len(self._doc_summaries) + 400)
             data = json.loads(generate(
-                prompt, model=SETTINGS.pageindex_model, fmt=_ROOT_SCHEMA, num_predict=400, temperature=0.0,
+                prompt, model=SETTINGS.pageindex_model, fmt=_ROOT_SCHEMA, num_predict=budget, temperature=0.0,
             ))
             picked = [d["doc"] for d in data.get("documents", [])
                       if d.get("relevant") and d.get("doc") in self._doc_summaries]
@@ -108,8 +112,9 @@ class PageIndexRAG(Approach):
             '{"selected": ["<id>", ...], "stop_here": true|false}'
         )
         try:
+            # Same truncation risk as root selection, smaller (no "reason" field here).
             data = json.loads(generate(
-                prompt, model=SETTINGS.pageindex_model, fmt=_DESCEND_SCHEMA, num_predict=200, temperature=0.0,
+                prompt, model=SETTINGS.pageindex_model, fmt=_DESCEND_SCHEMA, num_predict=600, temperature=0.0,
             ))
             selected = [cid for cid in data.get("selected", []) if cid in tree.nodes][: SETTINGS.pageindex_max_breadth]
             stop_here = bool(data.get("stop_here", False)) or not selected

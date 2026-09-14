@@ -39,27 +39,29 @@ os.environ.setdefault("DEEPEVAL_RESULTS_FOLDER", str(CACHE_DIR / "deepeval"))
 
 @dataclass
 class Settings:
-    # --- Provider: "claude" (default) or "llamaswap" ---
-    # Claude: Anthropic API for generation (ANTHROPIC_API_KEY required) +
-    #         sentence-transformers for embeddings (no separate server).
-    # llamaswap: set RAG_PROVIDER=llamaswap RAG_EMBED_MODEL=embeddinggemma:latest RAG_EMBED_DIM=768
+    # --- Provider: "claude" (default) or "llamaswap" --- controls GENERATION only.
+    # Claude: Anthropic API (ANTHROPIC_API_KEY required).
+    # llamaswap: local models served via llama-swap, e.g.
+    #   RAG_PROVIDER=llamaswap RAG_GEN_MODEL=qwen38fn-sglang-tp2-starfleet
+    # Embeddings are provider-independent — see below.
     provider: str = os.environ.get("RAG_PROVIDER", "claude")
 
     # --- Local provider (only used when provider=llamaswap) ---
-    # Point at llama-swap (:28080) rather than the Ollama daemon directly (:11434).
-    # llama-swap only routes OpenAI/Anthropic-compatible /v1/* paths (it 404s on
-    # Ollama-native /api/*), so the client below talks /v1/embeddings +
-    # /v1/chat/completions | /v1/messages. These /v1/* paths also work against a
-    # direct Ollama daemon, so this host may be set back to :11434 if needed.
+    # There is no Ollama daemon anymore (retired on this box); every local model,
+    # including the reasoning ones, is served via llama-swap (:28080), which only
+    # routes OpenAI/Anthropic-compatible /v1/* paths.
     llamaswap_host: str = os.environ.get("LLAMASWAP_HOST", "http://localhost:28080")
     # Generation wire format for the local provider:
-    #   "openai"    -> POST /v1/chat/completions  (Ollama daemon + ds4 both speak this)
-    #   "anthropic" -> POST /v1/messages          (ds4 / deepseek-v4-flash; not the Ollama daemon)
-    # Embeddings are always OpenAI-style (/v1/embeddings); there is no Anthropic embeddings API.
+    #   "openai"    -> POST /v1/chat/completions  (most llama-swap members)
+    #   "anthropic" -> POST /v1/messages          (ds4 / deepseek-v4-flash only)
     local_api_style: str = os.environ.get("RAG_LOCAL_API", "openai")
 
     # --- Embeddings ---
-    # provider=claude default: intfloat/multilingual-e5-small via sentence-transformers (384-d)
+    # ALWAYS sentence-transformers (CPU, no server) regardless of RAG_PROVIDER — see
+    # llamaswap_client.py's embed_one/embed_many. llama-swap's GPU-hosted embedding
+    # members (embeddinggemma, nomic-embed-text) compete with pinned Starfleet models
+    # for GPU memory and can CUDA-OOM under normal pool pressure; sentence-transformers
+    # has no such contention. Default: intfloat/multilingual-e5-small (384-d).
     embed_model: str = os.environ.get("RAG_EMBED_MODEL", "intfloat/multilingual-e5-small")
     embed_dim: int = int(os.environ.get("RAG_EMBED_DIM", "384"))
 

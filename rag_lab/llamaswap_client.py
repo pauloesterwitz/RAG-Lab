@@ -1,16 +1,14 @@
-"""Local llama-swap HTTP client: embeddings + generation against llama-swap's
-OpenAI/Anthropic-compatible endpoint, with a thread-pool helper for concurrent calls.
+"""Local llama-swap HTTP client: generation against llama-swap's OpenAI/Anthropic-
+compatible endpoint, with a thread-pool helper for concurrent calls.
 
 Targets SETTINGS.llamaswap_host (default: llama-swap at :28080). llama-swap only
-routes /v1/* paths — it 404s on Ollama-native /api/* — so this client speaks:
+routes /v1/* paths — it 404s on Ollama-native /api/* — so generation speaks:
 
-  * embeddings  -> POST /v1/embeddings              (OpenAI-style; always)
-  * generation  -> POST /v1/chat/completions        (SETTINGS.local_api_style="openai")
-                or POST /v1/messages                 (SETTINGS.local_api_style="anthropic")
+  * POST /v1/chat/completions   (SETTINGS.local_api_style="openai", default)
+  * POST /v1/messages           (SETTINGS.local_api_style="anthropic")
 
-The /v1/* paths also work against a direct Ollama daemon (:11434), so nothing
-here is llama-swap-specific. EmbeddingGemma works best with task-specific prompt
-prefixes, so we apply them based on whether we embed a query or a document."""
+Embeddings do NOT go through llama-swap (see below) — this module only handles
+generation over HTTP."""
 from __future__ import annotations
 
 import concurrent.futures as cf
@@ -21,6 +19,16 @@ from typing import Iterable, Optional
 import httpx
 
 from .config import SETTINGS
+
+# ---------------------------------------------------------------------------
+# Embeddings — always local (sentence-transformers, CPU), regardless of
+# RAG_PROVIDER. The Ollama daemon that used to serve embeddinggemma/nomic-embed-text
+# is gone; their vLLM replacements (llama-swap's serve-embed.sh) are GPU-hosted and
+# compete for the same constrained pool as pinned Starfleet models — a CUDA OOM was
+# observed there under normal pool pressure (2026-09-14). sentence-transformers has
+# no server dependency and no GPU contention, so it's the reliable path now.
+# ---------------------------------------------------------------------------
+from .claude_client import embed_one, embed_many  # noqa: F401, E402
 
 _TIMEOUT = httpx.Timeout(600.0, connect=10.0)
 _RETRIES = 3
@@ -63,46 +71,6 @@ def _post_with_retry(path: str, payload: dict) -> dict:
     raise RuntimeError(f"Local call to {path} failed after {_RETRIES} attempts: {last}")
 
 
-# --- EmbeddingGemma prompt templates (improve retrieval quality) ------------
-def _embed_prompt(text: str, role: str) -> str:
-    text = text.replace("\n", " ").strip()
-    if "embeddinggemma" in SETTINGS.embed_model:
-        if role == "query":
-            return f"task: search result | query: {text}"
-        return f"title: none | text: {text}"
-    return text
-
-
-def embed_one(text: str, role: str = "document", *, model: Optional[str] = None) -> list[float]:
-    model = model or SETTINGS.embed_model
-    data = _post_with_retry("/v1/embeddings", {"model": model, "input": _embed_prompt(text, role)})
-    return data["data"][0]["embedding"]
-
-
-def embed_many(
-    texts: list[str],
-    role: str = "document",
-    *,
-    model: Optional[str] = None,
-    concurrency: Optional[int] = None,
-    progress=None,
-) -> list[list[float]]:
-    """Embed many texts concurrently. `progress(done, total)` is called as work completes."""
-    model = model or SETTINGS.embed_model
-    concurrency = concurrency or SETTINGS.embed_concurrency
-    results: list[Optional[list[float]]] = [None] * len(texts)
-    done = 0
-    with cf.ThreadPoolExecutor(max_workers=concurrency) as ex:
-        futs = {ex.submit(embed_one, t, role, model=model): i for i, t in enumerate(texts)}
-        for fut in cf.as_completed(futs):
-            i = futs[fut]
-            results[i] = fut.result()
-            done += 1
-            if progress and (done % 5 == 0 or done == len(texts)):
-                progress(done, len(texts))
-    return [r for r in results]  # type: ignore[return-value]
-
-
 # ---------------------------------------------------------------------------
 # Generation — two wire formats, selected by SETTINGS.local_api_style
 # ---------------------------------------------------------------------------
@@ -110,7 +78,7 @@ def _generate_openai(
     prompt: str, *, model: str, system: Optional[str], temperature: float,
     max_tokens: int, fmt: Optional[dict | str], no_think: bool,
 ) -> str:
-    """POST /v1/chat/completions. Spoken by the Ollama daemon AND ds4."""
+    """POST /v1/chat/completions. Spoken by most llama-swap members (sglang, vLLM)."""
     messages: list[dict] = []
     if system:
         messages.append({"role": "system", "content": system})
@@ -144,7 +112,7 @@ def _generate_anthropic(
     prompt: str, *, model: str, system: Optional[str], temperature: float,
     max_tokens: int, fmt: Optional[dict | str], no_think: bool,
 ) -> str:
-    """POST /v1/messages. Spoken by ds4 (deepseek-v4-flash); NOT the Ollama daemon."""
+    """POST /v1/messages. Spoken by ds4 (deepseek-v4-flash) only."""
     sys_parts = [system] if system else []
     if fmt is not None:  # no response_format in the Messages API — steer via system
         sys_parts.append("Respond with valid JSON only, with no prose or code fences.")
@@ -218,14 +186,14 @@ def list_models() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Provider dispatch: when RAG_PROVIDER=claude, replace this module's public
+# Provider dispatch: when RAG_PROVIDER=claude, replace this module's generation
 # symbols with the Claude implementations (Anthropic SDK -> api.anthropic.com)
-# so no import sites need changing.
+# so no import sites need changing. embed_one/embed_many are NOT swapped here —
+# they're already the (same) sentence-transformers implementation regardless of
+# provider, imported unconditionally above.
 # ---------------------------------------------------------------------------
 if SETTINGS.provider == "claude":
     from .claude_client import (  # noqa: F401, E402
-        embed_one,
-        embed_many,
         generate,
         generate_many,
         list_models,
