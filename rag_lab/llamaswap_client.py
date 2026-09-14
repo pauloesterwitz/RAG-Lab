@@ -131,8 +131,12 @@ def _generate_openai(
     data = _post_with_retry("/v1/chat/completions", payload)
     choices = data.get("choices") or [{}]
     msg = choices[0].get("message", {}) or {}
-    # Fall back to the reasoning channel if a model emitted only that.
-    out = msg.get("content") or msg.get("reasoning") or ""
+    # Fall back to the reasoning channel if a model emitted only that. Field name
+    # varies by backend: the Ollama daemon uses "reasoning"; sglang-served models
+    # (ds4, qwen38fn, glm53, minimax, ...) use "reasoning_content" instead — even
+    # with reasoning_effort="none" the answer can still land there (reasoning_tokens
+    # stays 0, so it isn't actual chain-of-thought, just where that backend puts it).
+    out = msg.get("content") or msg.get("reasoning_content") or msg.get("reasoning") or ""
     return _extract_json(out) if fmt is not None else out
 
 
