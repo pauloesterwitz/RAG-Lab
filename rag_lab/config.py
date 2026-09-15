@@ -101,7 +101,7 @@ class Settings:
     pageindex_max_depth: int = int(os.environ.get("RAG_PAGEINDEX_MAX_DEPTH", "4"))
     pageindex_max_breadth: int = int(os.environ.get("RAG_PAGEINDEX_MAX_BREADTH", "2"))  # children descended per hop
     pageindex_max_docs: int = int(os.environ.get("RAG_PAGEINDEX_MAX_DOCS", "3"))        # root-level fan-out cap
-    pageindex_summary_chars: int = int(os.environ.get("RAG_PAGEINDEX_SUMMARY_CHARS", "1200"))
+    pageindex_summary_chars: int = int(os.environ.get("RAG_PAGEINDEX_SUMMARY_CHARS", "2500"))
 
     # --- Concurrency ---
     embed_concurrency: int = int(os.environ.get("RAG_EMBED_CONCURRENCY", "6"))

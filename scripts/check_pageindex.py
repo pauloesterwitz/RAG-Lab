@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from rag_lab.pageindex_build import _sentence_like, _toc_usable  # noqa: E402
+from rag_lab.pageindex_build import _FRONT_MATTER_RE, _leaf_body, _sentence_like, _toc_usable  # noqa: E402
 
 # Table of contents: bookmarks pointing nowhere or only at the first pages carry no structure.
 assert not _toc_usable([-1] * 7 + [1, 1], 10)
@@ -21,5 +21,15 @@ assert _sentence_like("deployment, Guardrails are implemented as a final safety 
 assert not _sentence_like("A Thought Leader's Perspective: Power and Responsibility")
 assert not _sentence_like("Chapter 12: Exception Handling and Recovery in Multi-Agent Systems at Production Scale")
 assert not _sentence_like("Index of Terms")
+
+# Leaf text starts at the section's own heading, even across a line break; else at the top.
+page = "end of the DoS case. Case Study #6: Agents\nReflect Provider Values. The agent..."
+assert _leaf_body("Case Study #6: Agents Reflect Provider Values", page, 1000).startswith("Case Study #6")
+assert _leaf_body("Not On This Page", page, 1000).startswith("end of the DoS case")
+assert len(_leaf_body("Case Study #6", page, 20)) == 20
+
+# Front matter stays out of root summaries and section lists.
+assert all(_FRONT_MATTER_RE.match(t) for t in ("Brief Contents", "Preface", "Acknowledgment", "About this Book"))
+assert not any(_FRONT_MATTER_RE.match(t) for t in ("Chapter 1: Prompt Chaining", "Conclusion", "References"))
 
 print("pageindex checks ok")

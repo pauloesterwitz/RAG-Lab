@@ -6,6 +6,7 @@ range overlaps it. Bolts on next to the flat BaseIndex / GraphRAG's graph,
 same INDEX_DIR-sibling-directory pattern as graph_build.py."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -235,35 +236,52 @@ def _summarize_tree(tree: PITree, index: BaseIndex, doc_name: str, cache_dir: Pa
     chunk_by_id = {c.id: c for c in index.chunks if c.doc == doc_name}
     cache_dir.mkdir(parents=True, exist_ok=True)
 
+    limit = SETTINGS.pageindex_summary_chars
     for node in sorted(tree.nodes.values(), key=lambda n: _subtree_depth(tree, n)):  # leaves first
-        cache_f = cache_dir / f"{_slug(tree.doc)}__{_slug(node.id)}.txt"
-        if cache_f.exists():
-            node.summary = cache_f.read_text()
-        elif not node.children:
+        if node.children:
+            kids = [tree.nodes[cid] for cid in node.children]
+            if node.id == tree.root_id:
+                kids = [k for k in kids if not _FRONT_MATTER_RE.match(k.title)] or kids
+            # Clip each child rather than the joined text, so late chapters still reach the rollup.
+            clip = max(80, limit // len(kids))
+            rollup = "\n".join(f"- {k.title}: {k.summary[:clip]}" for k in kids)
+            prompt = _ROLLUP_PROMPT.format(title=node.title, children=rollup)
+        else:
             texts = [chunk_by_id[cid].text for cid in node.chunk_ids if cid in chunk_by_id]
-            body = "\n\n".join(texts)[:SETTINGS.pageindex_summary_chars]
-            if not body.strip():
-                node.summary = node.title
+            body = _leaf_body(node.title, "\n\n".join(texts), limit)
+            prompt = _LEAF_PROMPT.format(title=node.title, text=body) if body.strip() else None
+        if prompt is None:
+            node.summary = node.title
+        else:
+            # Keyed by content, not node position: a changed tree can't inherit another section's summary.
+            cache_f = cache_dir / f"{_slug(tree.doc)}__{hashlib.sha1(prompt.encode()).hexdigest()[:16]}.txt"
+            if cache_f.exists():
+                node.summary = cache_f.read_text()
             else:
                 try:
-                    node.summary = generate(
-                        _LEAF_PROMPT.format(title=node.title, text=body),
-                        model=SETTINGS.pageindex_model, num_predict=160, temperature=0.2,
-                    ).strip()
+                    node.summary = generate(prompt, model=SETTINGS.pageindex_model,
+                                            num_predict=160, temperature=0.2).strip()
+                    cache_f.write_text(node.summary)
                 except Exception:
                     node.summary = node.title
-        else:
-            rollup = "\n".join(f"- {tree.nodes[cid].title}: {tree.nodes[cid].summary}" for cid in node.children)
-            try:
-                node.summary = generate(
-                    _ROLLUP_PROMPT.format(title=node.title, children=rollup[:SETTINGS.pageindex_summary_chars]),
-                    model=SETTINGS.pageindex_model, num_predict=160, temperature=0.2,
-                ).strip()
-            except Exception:
-                node.summary = node.title
-        cache_f.write_text(node.summary)
         if node_done:
             node_done(node.id)
+
+
+_FRONT_MATTER_RE = re.compile(
+    r"^(brief contents|table of contents|contents|preface|foreword|acknowledg|dedication|copyright"
+    r"|about (this|the) (book|author)|front matter|bibliographic)",
+    re.IGNORECASE,
+)
+
+
+# Start at the section's own heading: a section that begins mid-page otherwise gets
+# summarized from the previous section's tail (observed: Case Study #6 summarized as #5).
+def _leaf_body(title: str, text: str, limit: int) -> str:
+    flat = " ".join(text.split())
+    key = " ".join(title.split())[:40].lower()
+    at = flat.lower().find(key) if key else -1
+    return flat[max(at, 0):][:limit]
 
 
 def build_document_tree(pdf_path: Path, index: BaseIndex,
@@ -316,7 +334,8 @@ def build_pageindex_trees(index: BaseIndex, progress: Optional[Callable[[str, fl
             continue
         (TREES_DIR / f"{_slug(pdf.name)}.json").write_text(json.dumps(tree.to_dict(), indent=2))
         root = tree.nodes[tree.root_id]
-        doc_summaries[pdf.name] = {"title": root.title, "summary": root.summary}
+        sections = [tree.nodes[c].title for c in root.children if not _FRONT_MATTER_RE.match(tree.nodes[c].title)]
+        doc_summaries[pdf.name] = {"title": root.title, "summary": root.summary, "sections": sections}
         total_nodes += len(tree.nodes)
         docs_toc += meta["source"] == "toc"
         docs_heuristic += meta["source"] == "heuristic"
