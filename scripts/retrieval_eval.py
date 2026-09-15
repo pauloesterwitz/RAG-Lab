@@ -94,16 +94,52 @@ def compare(cases: list[dict], ref_file: Path) -> str:
     return f"vs {ref_file.name}: {', '.join(parts)}, net {net:+d}; multi all-docs {all_ref} -> {all_now}"
 
 
+def use_llm_cache(name: str) -> None:
+    """Replay identical model calls from disk. The pinned model isn't deterministic under
+    concurrent load (two identical PageIndex runs flipped 11 cases), which swamps a paired A/B."""
+    import atexit
+    import hashlib
+    import threading
+    import rag_lab.llamaswap_client as client
+
+    path = EVAL_DIR / f"llm_cache_{name}.json"
+    cache = json.loads(path.read_text()) if path.exists() else {}
+    lock, stats, live = threading.Lock(), {"hits": 0, "new": 0}, client.generate
+
+    def generate(prompt, *args, **kw):
+        key = hashlib.sha1(json.dumps([prompt, args, kw], sort_keys=True, default=str).encode()).hexdigest()
+        with lock:
+            if key in cache:
+                stats["hits"] += 1
+                return cache[key]
+        out = live(prompt, *args, **kw)
+        with lock:
+            cache[key] = out
+            stats["new"] += 1
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(cache))
+            tmp.replace(path)
+        return out
+
+    for mod_name, mod in list(sys.modules.items()):
+        if mod_name.startswith("rag_lab.") and getattr(mod, "generate", None) is live:
+            mod.generate = generate
+    atexit.register(lambda: print(f"llm cache {name}: {stats['hits']} replayed, {stats['new']} new calls", flush=True))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--tag", required=True, help="run label, used in the output filename")
     ap.add_argument("-a", "--approaches", nargs="+", default=APPROACH_ORDER)
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--compare", metavar="TAG", help="print paired hit flips against an earlier run")
+    ap.add_argument("--llm-cache", metavar="NAME", help="replay identical model calls via data/eval/llm_cache_NAME.json")
     args = ap.parse_args()
 
     goldens = load_goldens()["goldens"]
     index = load_base_index(refresh=True)
+    if args.llm_cache:
+        use_llm_cache(args.llm_cache)
     for name in args.approaches:
         approach = get_approach(name, index)
         t0 = time.time()
