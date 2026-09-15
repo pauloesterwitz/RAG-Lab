@@ -45,8 +45,10 @@ def run_case(approach, g: dict) -> dict:
         "gold_doc_share": sum(d in gold_docs for d in docs) / len(docs) if docs else 0.0,
         "fallback": any(c.stage == "fallback" for c in res.contexts),
         # PageIndex trace labels: one root-selection call plus one call per descend/stop decision.
-        "llm_calls": (sum(l == "Root selection" or "Descend from" in l or "Stopped at" in l for l in labels)
+        "llm_calls": (sum(l == "Root selection" or "Descend " in l or "Stopped at" in l for l in labels)
                       if approach.name.startswith("pageindex") else None),
+        # Calls that still failed after the client's retries; PageIndex degrades silently on them.
+        "failed_calls": sum(t.detail == "parse failed" or "Descend failed" in t.label for t in res.trace),
         "latency_s": round(res.latency_s, 2),
         "retrieved": [{k: v for k, v in c.to_dict().items() if k != "text"} for c in res.contexts],
         "trace": [t.to_dict() for t in res.trace],
@@ -66,6 +68,7 @@ def summarize(cases: list[dict]) -> dict:
             "doc_hits": sum(c["doc_hit"] for c in cs),
             "gold_doc_share": round(mean(c["gold_doc_share"] for c in cs), 3),
             "fallbacks": sum(c["fallback"] for c in cs),
+            "failed_calls": sum(c["failed_calls"] for c in cs),
             "latency_s": round(mean(c["latency_s"] for c in cs), 1),
         }
         if hop == "multi":
@@ -121,7 +124,7 @@ def main() -> None:
         print(f"{name} [{time.time() - t0:.0f}s] chunk hit {summary['all']['chunk_hits']}/100 "
               f"(single {s['chunk_hits']}, multi {m['chunk_hits']}) | recall {s['chunk_recall']}/{m['chunk_recall']} "
               f"| multi all-docs {m['all_docs']} | gold-doc share {summary['all']['gold_doc_share']} "
-              f"| fallbacks {summary['all']['fallbacks']}"
+              f"| fallbacks {summary['all']['fallbacks']} | failed calls {summary['all']['failed_calls']}"
               + (f" | llm calls {summary['all']['llm_calls']}" if "llm_calls" in summary["all"] else ""),
               flush=True)
         if args.compare and out_path(args.compare, name).exists():

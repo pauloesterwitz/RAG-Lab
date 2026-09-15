@@ -139,7 +139,8 @@ class PageIndexRAG(Approach):
             selected = [cid for cid in data.get("selected", []) if cid in tree.nodes][: SETTINGS.pageindex_max_breadth]
             stop_here = bool(data.get("stop_here", False)) or not selected
         except Exception:
-            selected, stop_here = [], True
+            trace.append(TraceStep(f"[{doc}] Descend failed: {node.title}", "call or parse failed"))
+            return []
         if stop_here:
             trace.append(TraceStep(f"[{doc}] Stopped at: {node.title}", f"p.{node.page_start}-{node.page_end}"))
             return []
