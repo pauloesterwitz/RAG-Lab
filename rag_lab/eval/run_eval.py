@@ -70,6 +70,13 @@ def _build_metrics(judge) -> list:
     ]
 
 
+def gold_sets(g: dict) -> tuple[set[str], set[str]]:
+    """(gold chunk ids, gold doc names). Multi-hop goldens' source_file is a literal
+    "docA.pdf + docB.pdf" (DeepEval's synthesizer pairs two docs), so split it."""
+    gold_docs = {d.strip() for d in (g.get("source_file") or "").split(" + ") if d.strip()}
+    return set(g.get("gold_chunk_ids", [])), gold_docs
+
+
 def _run_approach_outputs(approach_name: str, goldens: list[dict], index, progress=None):
     """Run the approach over every golden, returning test cases + per-case retrieval info."""
     approach = get_approach(approach_name, index)
@@ -82,13 +89,7 @@ def _run_approach_outputs(approach_name: str, goldens: list[dict], index, progre
         res = approach.run(g["input"], generate_answer=True)
         retrieved_ids = [c.chunk.id for c in res.contexts]
         retrieved_docs = {c.chunk.doc for c in res.contexts}
-        gold_ids = set(g.get("gold_chunk_ids", []))
-        # Multi-hop goldens' source_file is a literal "docA.pdf + docB.pdf" (DeepEval's
-        # synthesizer always pairs two docs) — exact-matching that whole string against
-        # individual retrieved doc names was structurally always False for every
-        # multi-hop golden, for every approach. Split and use set intersection instead;
-        # degrades to the original single-doc check for single-hop goldens.
-        gold_docs = {d.strip() for d in (g.get("source_file") or "").split(" + ") if d.strip()}
+        gold_ids, gold_docs = gold_sets(g)
         case = LLMTestCase(
             input=g["input"],
             actual_output=res.answer,
