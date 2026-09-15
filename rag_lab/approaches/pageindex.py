@@ -74,8 +74,7 @@ class PageIndexRAG(Approach):
             "You are choosing which documents to search to answer a question, based only on "
             "each document's title and summary (like scanning a library shelf). Some questions "
             "combine information from TWO OR MORE documents — mark EVERY document that could "
-            "plausibly contribute PART of the answer, not just the single closest match. When "
-            "genuinely unsure, mark a document relevant rather than excluding it.\n\n"
+            "plausibly contribute PART of the answer, not just the single closest match.\n\n"
             f"Documents:\n{listing}\n\nQuestion: {query}\n\n"
             'Reply JSON: {"documents": [{"doc": "<exact name>", "relevant": true|false, "reason": ".."}]}'
         )
