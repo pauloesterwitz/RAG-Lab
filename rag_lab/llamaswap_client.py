@@ -72,19 +72,21 @@ def _post_with_retry(path: str, payload: dict) -> dict:
     raise RuntimeError(f"Local call to {path} failed after {_RETRIES} attempts: {last}")
 
 
-# --- EmbeddingGemma prompt templates (improve retrieval quality) ------------
-def _embed_prompt(text: str, role: str) -> str:
+# --- Embedding-model task prefixes (improve retrieval quality) ---------------
+def _embed_prompt(text: str, role: str, model: str) -> str:
     text = text.replace("\n", " ").strip()
-    if "embeddinggemma" in SETTINGS.embed_model:
+    if "embeddinggemma" in model:
         if role == "query":
             return f"task: search result | query: {text}"
         return f"title: none | text: {text}"
+    if "nomic-embed" in model:  # the nomic-embed-text-v1.5 model card makes the task prefix mandatory
+        return f"search_query: {text}" if role == "query" else f"search_document: {text}"
     return text
 
 
 def embed_one(text: str, role: str = "document", *, model: Optional[str] = None) -> list[float]:
     model = model or SETTINGS.embed_model
-    data = _post_with_retry("/v1/embeddings", {"model": model, "input": _embed_prompt(text, role)})
+    data = _post_with_retry("/v1/embeddings", {"model": model, "input": _embed_prompt(text, role, model)})
     return data["data"][0]["embedding"]
 
 
