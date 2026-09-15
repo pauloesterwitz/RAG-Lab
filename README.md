@@ -343,6 +343,20 @@ Bold = best in column.
 
 ---
 
+### qwen38fn + Kathryn nomic-embed run (local, all 7 approaches)
+
+**Configuration:** 100 goldens · judge/gen `qwen38fn-sglang-tp2-starfleet` · embeddings `nomic-embed-text-kathryn` (768-d, served from Kathryn) · generated 2026-09-15 07:04:20.
+
+| Approach | Composite | Single-hop | Multi-hop | Gold-chunk hit |
+|---|---|---|---|---|
+| Corrective RAG (CRAG) | 0.838 | 0.835 | 0.842 | 0.89 |
+| RAG + Reranker | 0.83 | 0.834 | 0.827 | 0.91 |
+| Plain RAG | 0.825 | 0.839 | 0.812 | 0.89 |
+| Agentic RAG | 0.825 | 0.847 | 0.803 | 0.89 |
+| HyDE | 0.822 | 0.848 | 0.796 | 0.88 |
+| GraphRAG | 0.821 | 0.844 | 0.799 | 0.89 |
+| PageIndex | 0.651 | 0.691 | 0.61 | 0.5 |
+
 ## Web App
 
 A Vue 3 single-page application served directly by the FastAPI backend.
