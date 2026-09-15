@@ -113,7 +113,8 @@ class PageIndexRAG(Approach):
         return picked[: SETTINGS.pageindex_max_docs]
 
     # --- per-hop tree descent -------------------------------------------------
-    def _choose_children(self, query: str, tree: PITree, node, trace: list[TraceStep], doc: str) -> list[str]:
+    def _choose_children(self, query: str, tree: PITree, node, trace: list[TraceStep], doc: str,
+                         scores: np.ndarray) -> list[str]:
         options = "\n".join(
             f'- id="{cid}" "{tree.nodes[cid].title}" (p.{tree.nodes[cid].page_start}-{tree.nodes[cid].page_end}): '
             f'{tree.nodes[cid].summary[:200]}'
@@ -135,24 +136,31 @@ class PageIndexRAG(Approach):
             data = json.loads(generate(
                 prompt, model=SETTINGS.pageindex_model, fmt=_DESCEND_SCHEMA, num_predict=budget, temperature=0.0,
             ))
-            selected = [cid for cid in data.get("selected", []) if cid in tree.nodes][: SETTINGS.pageindex_max_breadth]
-            stop_here = bool(data.get("stop_here", False)) or not selected
+            picked = [cid for cid in data.get("selected", []) if cid in tree.nodes]
+            stop_here = bool(data.get("stop_here", False)) or not picked
         except Exception:
             trace.append(TraceStep(f"[{doc}] Descend failed: {node.title}", "call or parse failed"))
             return []
         if stop_here:
             trace.append(TraceStep(f"[{doc}] Stopped at: {node.title}", f"p.{node.page_start}-{node.page_end}"))
             return []
+        # The model lists its picks in document order; keep the best-scoring ones, not the first ones.
+        picked.sort(key=lambda cid: self._node_best(tree.nodes[cid], scores), reverse=True)
+        selected = picked[: SETTINGS.pageindex_max_breadth]
         trace.append(TraceStep(f"[{doc}] Descend from: {node.title}",
-                                ", ".join(tree.nodes[c].title for c in selected)))
+                                f"model picked {len(picked)}, kept: " + ", ".join(tree.nodes[c].title for c in selected)))
         return selected
+
+    def _node_best(self, node, scores: np.ndarray) -> float:
+        return max((float(scores[self._pos_by_id[c]]) for c in node.chunk_ids if c in self._pos_by_id),
+                   default=float("-inf"))
 
     def _navigate(self, query: str, tree: PITree, node, trace: list[TraceStep], doc: str,
                   scores: np.ndarray, depth: int = 0) -> list[str]:
         if not node.children or depth >= SETTINGS.pageindex_max_depth:
             trace.append(TraceStep(f"[{doc}] Leaf: {node.title}", f"p.{node.page_start}-{node.page_end}"))
             return self._top_chunks(node.chunk_ids, scores)
-        selected = self._choose_children(query, tree, node, trace, doc)
+        selected = self._choose_children(query, tree, node, trace, doc, scores)
         if not selected:
             return self._top_chunks(node.chunk_ids, scores)
         gathered: list[str] = []
