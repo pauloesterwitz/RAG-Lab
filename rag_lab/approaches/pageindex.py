@@ -28,8 +28,7 @@ _ROOT_SCHEMA = {
                 },
                 "required": ["doc", "relevant"],
             },
-        },
-        "needs_multiple_documents": {"type": "boolean"},
+        }
     },
     "required": ["documents"],
 }
@@ -66,7 +65,7 @@ class PageIndexRAG(Approach):
 
     # --- root-level document fan-out (also the multi-hop mechanism: this one
     # call can mark >1 doc relevant, each navigated independently below) -----
-    def _select_documents(self, query: str, trace: list[TraceStep]) -> tuple[list[str], bool]:
+    def _select_documents(self, query: str, trace: list[TraceStep]) -> list[str]:
         listing = "\n".join(
             f'- "{doc}": {info.get("title") or doc} — {info.get("summary", "")[:300]}'
             for doc, info in self._doc_summaries.items()
@@ -76,15 +75,11 @@ class PageIndexRAG(Approach):
             "each document's title and summary (like scanning a library shelf). Some questions "
             "combine information from TWO OR MORE documents — mark EVERY document that could "
             "plausibly contribute PART of the answer, not just the single closest match. When "
-            "genuinely unsure, mark a document relevant rather than excluding it. Separately, set "
-            "needs_multiple_documents to true only if a complete answer has to combine facts from "
-            "two or more different documents.\n\n"
+            "genuinely unsure, mark a document relevant rather than excluding it.\n\n"
             f"Documents:\n{listing}\n\nQuestion: {query}\n\n"
-            'Reply JSON: {"documents": [{"doc": "<exact name>", "relevant": true|false, "reason": ".."}], '
-            '"needs_multiple_documents": true|false}'
+            'Reply JSON: {"documents": [{"doc": "<exact name>", "relevant": true|false, "reason": ".."}]}'
         )
         picked: list[str] = []
-        multi = False
         try:
             # Scales with doc count: some local models write a verbose "reason" per
             # entry, and a too-tight budget truncates mid-string -> invalid JSON
@@ -95,13 +90,10 @@ class PageIndexRAG(Approach):
             ))
             picked = [d["doc"] for d in data.get("documents", [])
                       if d.get("relevant") and d.get("doc") in self._doc_summaries]
-            # json_object mode doesn't enforce the schema: without the flag, assume multi if >1 doc picked.
-            multi = bool(data.get("needs_multiple_documents", len(picked) > 1))
             trace.append(TraceStep(
                 "Root selection",
-                ("(multi-document) " if multi else "(single-document) ")
-                + ("; ".join(f'{d["doc"]}: {d.get("reason", "")}' for d in data.get("documents", [])
-                             if d.get("relevant")) or "(none relevant)"),
+                "; ".join(f'{d["doc"]}: {d.get("reason", "")}' for d in data.get("documents", [])
+                          if d.get("relevant")) or "(none relevant)",
             ))
         except Exception:
             trace.append(TraceStep("Root selection", "parse failed"))
@@ -118,7 +110,7 @@ class PageIndexRAG(Approach):
         # never recovered. So: an empty `picked` now falls straight through to
         # retrieve()'s _hybrid_fallback (full corpus, hybrid search), same as before
         # this approach existed — that IS the better fallback for this failure mode.
-        return picked[: SETTINGS.pageindex_max_docs], multi
+        return picked[: SETTINGS.pageindex_max_docs]
 
     # --- per-hop tree descent -------------------------------------------------
     def _choose_children(self, query: str, tree: PITree, node, trace: list[TraceStep], doc: str,
@@ -186,17 +178,15 @@ class PageIndexRAG(Approach):
         scored.sort(key=lambda x: x[1], reverse=True)
         return [cid for cid, _ in scored[: SETTINGS.top_k]]
 
-    def _merge_with_doc_floor(self, chunk_ids: list[str], scores: np.ndarray,
-                              use_floor: bool = True) -> list[tuple[str, float]]:
+    def _merge_with_doc_floor(self, chunk_ids: list[str], scores: np.ndarray) -> list[tuple[str, float]]:
         """Final cross-location merge, with a per-document floor. A flat global
         top_k cut over every navigated document's candidates let one document's
         higher raw scores fully starve another: of multi-hop cases where both gold
         documents were correctly navigated, over half still had one document's
         chunks zeroed out of the final top_k. Reserve floor = max(1, top_k // n_docs)
         slots per document (best chunks first, by the same score), then fill any
-        remaining slots by global rank over what's left. Only when root selection
-        says the question needs several documents: on single-hop questions that
-        fanned out, the floor put wrong-document chunks into all 23 cases."""
+        remaining slots by global rank over what's left. Structure still decided the
+        candidate pool; this only changes how the top_k budget is split across it."""
         by_doc: dict[str, list[tuple[str, float]]] = {}
         for cid in chunk_ids:
             if cid not in self._pos_by_id:
@@ -206,7 +196,7 @@ class PageIndexRAG(Approach):
         for scored in by_doc.values():
             scored.sort(key=lambda x: x[1], reverse=True)
 
-        floor = max(1, SETTINGS.top_k // len(by_doc)) if by_doc and use_floor else 0
+        floor = max(1, SETTINGS.top_k // len(by_doc)) if by_doc else 0
         top: list[tuple[str, float]] = []
         used: set[str] = set()
         for scored in by_doc.values():
@@ -236,7 +226,7 @@ class PageIndexRAG(Approach):
         if not self._trees:
             return self._hybrid_fallback(query, trace, "PageIndex unavailable")
 
-        docs, multi = self._select_documents(query, trace)
+        docs = self._select_documents(query, trace)
         if not docs:
             return self._hybrid_fallback(query, trace, "No document selected")
 
@@ -260,7 +250,7 @@ class PageIndexRAG(Approach):
         if not gathered_ids:
             return self._hybrid_fallback(query, trace, "Tree navigation returned nothing")
 
-        top = self._merge_with_doc_floor(gathered_ids, scores, use_floor=multi)
+        top = self._merge_with_doc_floor(gathered_ids, scores)
         trace.append(TraceStep("Final ranking",
                                 f"{len(gathered_ids)} candidates from structure → top {len(top)} by hybrid score"))
         return [RetrievedChunk(self._chunk_by_id[cid], s, "pageindex") for cid, s in top]
