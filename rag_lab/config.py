@@ -149,8 +149,12 @@ APPROACHES = {
     },
     "pageindex": {
         "label": "PageIndex",
-        "description": "Hierarchical tree index (ToC/heading-derived); LLM navigates the tree structurally instead of vector similarity.",
+        "description": "Hierarchical tree index (ToC/heading-derived); an LLM navigates to the right sections, a fused BM25 + dense score picks chunks within them.",
+    },
+    "pageindex_hybrid": {
+        "label": "PageIndex Hybrid",
+        "description": "PageIndex tree navigation plus document-scoped hybrid search, merged by reciprocal rank fusion.",
     },
 }
 
-APPROACH_ORDER = ["plain", "rerank", "hyde", "corrective", "agentic", "graph", "pageindex"]
+APPROACH_ORDER = ["plain", "rerank", "hyde", "corrective", "agentic", "graph", "pageindex", "pageindex_hybrid"]

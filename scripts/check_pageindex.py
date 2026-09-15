@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from rag_lab.approaches.pageindex_hybrid import rrf  # noqa: E402
 from rag_lab.pageindex_build import _FRONT_MATTER_RE, _leaf_body, _sentence_like, _toc_usable  # noqa: E402
 
 # Table of contents: bookmarks pointing nowhere or only at the first pages carry no structure.
@@ -31,5 +32,10 @@ assert len(_leaf_body("Case Study #6", page, 20)) == 20
 # Front matter stays out of root summaries and section lists.
 assert all(_FRONT_MATTER_RE.match(t) for t in ("Brief Contents", "Preface", "Acknowledgment", "About this Book"))
 assert not any(_FRONT_MATTER_RE.match(t) for t in ("Chapter 1: Prompt Chaining", "Conclusion", "References"))
+
+# Reciprocal rank fusion: a chunk both lists surface outranks one only a single list has.
+fused = rrf([["a", "b", "c"], ["b", "d", "a"]])
+assert sorted(fused, key=fused.get, reverse=True) == ["b", "a", "d", "c"], fused
+assert list(rrf([["x", "y", "z"]])) == ["x", "y", "z"]
 
 print("pageindex checks ok")

@@ -351,7 +351,7 @@ def pageindex_rag():
         {"id": "Leaf or\nStop Here?",             "pos": (5.0, 4.1), "type": "decision"},
         {"id": "Descend to\nChild Node",          "pos": (8.2, 5.5), "type": "agent"},
         {"id": "Chunk Set\n(page-range mapped)",  "pos": (2.2, 2.8), "type": "retrieval"},
-        {"id": "Dense Tie-break\n(display order)","pos": (2.2, 1.4), "type": "intermediate"},
+        {"id": "Hybrid Score\n(trim + merge)","pos": (2.2, 1.4), "type": "intermediate"},
         {"id": "LLM\n(qwen3.6:35b)",       "pos": (5.5, 0.5), "type": "generation"},
         {"id": "Answer (cited)",                  "pos": (8.5, 0.5), "type": "output"},
     ]
@@ -362,11 +362,37 @@ def pageindex_rag():
         {"src": "Leaf or\nStop Here?",             "dst": "Descend to\nChild Node",          "label": "no, descend"},
         {"src": "Descend to\nChild Node",          "dst": "LLM: Choose\nSubsection",         "label": "retry deeper"},
         {"src": "Leaf or\nStop Here?",             "dst": "Chunk Set\n(page-range mapped)",  "label": "yes, leaf/stop"},
-        {"src": "Chunk Set\n(page-range mapped)",  "dst": "Dense Tie-break\n(display order)","label": ""},
-        {"src": "Dense Tie-break\n(display order)","dst": "LLM\n(qwen3.6:35b)",       "label": "top-k context"},
+        {"src": "Chunk Set\n(page-range mapped)",  "dst": "Hybrid Score\n(trim + merge)","label": ""},
+        {"src": "Hybrid Score\n(trim + merge)","dst": "LLM\n(qwen3.6:35b)",       "label": "top-k context"},
         {"src": "LLM\n(qwen3.6:35b)",        "dst": "Answer (cited)",                 "label": ""},
     ]
     draw_diagram("pageindex_rag", "PageIndex (Hierarchical Tree Navigation)", nodes, edges)
+
+
+def pageindex_hybrid_rag():
+    nodes = [
+        {"id": "Query",                              "pos": (5.0, 8.3), "type": "input"},
+        {"id": "Root Selection\n(doc summaries)",    "pos": (5.0, 6.9), "type": "retrieval"},
+        {"id": "LLM Tree\nNavigation",               "pos": (2.5, 5.3), "type": "agent"},
+        {"id": "Doc-scoped Hybrid\n(BM25 + dense)",  "pos": (7.5, 5.3), "type": "retrieval"},
+        {"id": "Tree Candidates\n(visited sections)", "pos": (2.5, 3.8), "type": "retrieval"},
+        {"id": "Value Candidates\n(top-k per doc)",  "pos": (7.5, 3.8), "type": "retrieval"},
+        {"id": "RRF Merge\n(+ per-doc floor)",       "pos": (5.0, 2.4), "type": "intermediate"},
+        {"id": "LLM\n(qwen3.6:35b)",                 "pos": (5.0, 1.0), "type": "generation"},
+        {"id": "Answer (cited)",                     "pos": (1.5, 1.0), "type": "output"},
+    ]
+    edges = [
+        {"src": "Query",                              "dst": "Root Selection\n(doc summaries)",    "label": ""},
+        {"src": "Root Selection\n(doc summaries)",    "dst": "LLM Tree\nNavigation",               "label": "selected docs"},
+        {"src": "Root Selection\n(doc summaries)",    "dst": "Doc-scoped Hybrid\n(BM25 + dense)",  "label": "selected docs"},
+        {"src": "LLM Tree\nNavigation",               "dst": "Tree Candidates\n(visited sections)", "label": ""},
+        {"src": "Doc-scoped Hybrid\n(BM25 + dense)",  "dst": "Value Candidates\n(top-k per doc)",  "label": ""},
+        {"src": "Tree Candidates\n(visited sections)", "dst": "RRF Merge\n(+ per-doc floor)",       "label": ""},
+        {"src": "Value Candidates\n(top-k per doc)",  "dst": "RRF Merge\n(+ per-doc floor)",       "label": ""},
+        {"src": "RRF Merge\n(+ per-doc floor)",       "dst": "LLM\n(qwen3.6:35b)",                 "label": ""},
+        {"src": "LLM\n(qwen3.6:35b)",                 "dst": "Answer (cited)",                     "label": ""},
+    ]
+    draw_diagram("pageindex_hybrid_rag", "PageIndex Hybrid (Tree + Value Search, RRF)", nodes, edges)
 
 
 # ===========================================================================
@@ -375,7 +401,8 @@ def pageindex_rag():
 
 if __name__ == "__main__":
     print("Generating RAG pipeline diagrams…")
-    for fn in (plain_rag, rerank_rag, hyde_rag, corrective_rag, agentic_rag, graph_rag, pageindex_rag):
+    for fn in (plain_rag, rerank_rag, hyde_rag, corrective_rag, agentic_rag, graph_rag, pageindex_rag,
+               pageindex_hybrid_rag):
         print(f"\n[{fn.__name__}]")
         fn()
     print("\nDone.")

@@ -250,6 +250,10 @@ class PageIndexRAG(Approach):
         if not gathered_ids:
             return self._hybrid_fallback(query, trace, "Tree navigation returned nothing")
 
+        return self._final_ranking(docs, gathered_ids, scores, trace)
+
+    def _final_ranking(self, docs: list[str], gathered_ids: list[str], scores: np.ndarray,
+                       trace: list[TraceStep]) -> list[RetrievedChunk]:
         top = self._merge_with_doc_floor(gathered_ids, scores)
         trace.append(TraceStep("Final ranking",
                                 f"{len(gathered_ids)} candidates from structure → top {len(top)} by hybrid score"))
