@@ -34,11 +34,20 @@ _HEADING_SIZE_RATIO = 1.15
 # boilerplate can't skew which sizes get picked as heading levels.
 _BOILERPLATE_RE = re.compile(
     r"©|\ball rights reserved\b|\blicense[ds]?\b|\bterms of\b|\bshare-?alike\b|\bcc[- ]by\b"
-    r"|\bcreative commons\b|\bnon-?commercial\b|\bdistributed under\b|\bpermits use\b",
+    r"|\bcreative commons\b|\bnon-?commercial\b|\bdistributed under\b|\bpermits use\b"
+    r"|\belectronic library\b|\brecommended citation\b|\btmp\.\d+",
     re.IGNORECASE,
 )
 _MIN_HEADING_CHARS = 3  # drop drop-caps/decorative single letters ("X") a font-size pass mistakes for a heading
 _MAX_HEADING_CHARS = 120
+_ALWAYS_HEADING_RE = re.compile(r"^(chapter|appendix|part)\b", re.IGNORECASE)
+
+
+# Large-font body text (a glossary, pull quotes) passes the size test; real headings here run 3-7 words.
+def _sentence_like(text: str) -> bool:
+    if _ALWAYS_HEADING_RE.match(text):
+        return False
+    return len(text.split()) >= 10 or text[:1].islower() or text[:1] == "("
 
 
 def _slug(name: str) -> str:
@@ -82,12 +91,20 @@ class PITree:
 # --- structure extraction ----------------------------------------------------
 def _toc_entries(pdf_path: Path) -> Optional[list[tuple[int, str, int]]]:
     """[(level, title, page_1based), ...] from the PDF's own bookmarks, or None
-    if it has no real table of contents."""
+    if it has no usable table of contents."""
     with fitz.open(pdf_path) as doc:
         toc = doc.get_toc(simple=True)
-    if not toc:
+        page_count = doc.page_count
+    if not toc or not _toc_usable([int(page) for _, _, page in toc], page_count):
         return None
     return [(int(lvl), (title or "").strip(), max(1, int(page))) for lvl, title, page in toc]
+
+
+# Bookmarks that point nowhere (page -1) or only at the first pages carry no structure
+# (observed: Using AI, 7 of 9 entries at page -1; AI Readiness, all 9 on pages 1-2 of 9).
+def _toc_usable(pages: list[int], page_count: int) -> bool:
+    valid = [p for p in pages if p >= 1]
+    return len(valid) >= 0.7 * len(pages) and len(set(valid)) >= 3 and max(valid) >= 0.25 * page_count
 
 
 def _heuristic_entries(pdf_path: Path) -> list[tuple[int, str, int]]:
@@ -135,7 +152,7 @@ def _heuristic_entries(pdf_path: Path) -> list[tuple[int, str, int]]:
             merged[-1] = (level, f"{prev[1]} {text}", pno)
         else:
             merged.append((level, text, pno))
-    return merged
+    return [e for e in merged if not _sentence_like(e[1])]
 
 
 def _build_hierarchy(doc_name: str, doc_slug: str, entries: list[tuple[int, str, int]], page_count: int) -> PITree:
