@@ -62,12 +62,15 @@ class BaseIndex:
         idx = np.argsort(-scores)[:k]
         return [(int(i), float(scores[i])) for i in idx]
 
+    def hybrid_scores(self, query: str, query_vec, bm25_weight: float = 0.35) -> np.ndarray:
+        dense = _minmax(self.dense_scores(query_vec))
+        sparse = _minmax(self.bm25_scores(query))
+        return (1 - bm25_weight) * dense + bm25_weight * sparse
+
     def hybrid_search(
         self, query: str, query_vec, k: int, bm25_weight: float = 0.35
     ) -> list[tuple[int, float]]:
-        dense = _minmax(self.dense_scores(query_vec))
-        sparse = _minmax(self.bm25_scores(query))
-        fused = (1 - bm25_weight) * dense + bm25_weight * sparse
+        fused = self.hybrid_scores(query, query_vec, bm25_weight)
         idx = np.argsort(-fused)[:k]
         return [(int(i), float(fused[i])) for i in idx]
 

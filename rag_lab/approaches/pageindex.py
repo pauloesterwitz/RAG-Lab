@@ -1,9 +1,8 @@
-"""PageIndex: vectorless, reasoning-based retrieval. Instead of embedding
-similarity, an LLM navigates each document's prebuilt hierarchical tree index
-(root -> section -> subsection, ToC/heading-derived) by reading node titles
-and summaries — the way a reader flips to the right section of a report.
-Candidate selection is 100% structural; only the final display order among
-selected candidates uses a cheap dense-similarity tie-break."""
+"""PageIndex: reasoning-based retrieval. An LLM navigates each document's prebuilt
+hierarchical tree index (root -> section -> subsection, ToC/heading-derived) by
+reading node titles and summaries, the way a reader flips to the right section of
+a report. Structure decides which sections to read; a fused BM25 + dense score
+picks the best chunks within them and orders the final merge."""
 from __future__ import annotations
 
 import json
@@ -149,46 +148,43 @@ class PageIndexRAG(Approach):
         return selected
 
     def _navigate(self, query: str, tree: PITree, node, trace: list[TraceStep], doc: str,
-                  dense: np.ndarray, depth: int = 0) -> list[str]:
+                  scores: np.ndarray, depth: int = 0) -> list[str]:
         if not node.children or depth >= SETTINGS.pageindex_max_depth:
             trace.append(TraceStep(f"[{doc}] Leaf: {node.title}", f"p.{node.page_start}-{node.page_end}"))
-            return self._top_chunks(node.chunk_ids, dense)
+            return self._top_chunks(node.chunk_ids, scores)
         selected = self._choose_children(query, tree, node, trace, doc)
         if not selected:
-            return self._top_chunks(node.chunk_ids, dense)
+            return self._top_chunks(node.chunk_ids, scores)
         gathered: list[str] = []
         for cid in selected:
-            gathered.extend(self._navigate(query, tree, tree.nodes[cid], trace, doc, dense, depth + 1))
+            gathered.extend(self._navigate(query, tree, tree.nodes[cid], trace, doc, scores, depth + 1))
         return gathered
 
-    def _top_chunks(self, chunk_ids: list[str], dense: np.ndarray) -> list[str]:
+    def _top_chunks(self, chunk_ids: list[str], scores: np.ndarray) -> list[str]:
         """Cap ONE navigated location's contribution to the candidate pool by its
-        own top-k dense similarity, before it's merged with other locations. A
-        broad stop/leaf node (a whole section) would otherwise dump every one of
-        its chunks into the pool, diluting the final top-k with off-topic
-        siblings — structure still decided *which locations* to visit; this only
-        trims *within* a location, same "structure picks candidates, similarity
-        only orders/trims" split as the final ranking step below."""
-        scored = [(cid, float(dense[self._pos_by_id[cid]])) for cid in chunk_ids if cid in self._pos_by_id]
+        own top-k score, before it's merged with other locations. A broad stop/leaf
+        node (a whole section) would otherwise dump every one of its chunks into the
+        pool, diluting the final top-k with off-topic siblings. Structure still
+        decides *which locations* to visit; this only trims *within* a location."""
+        scored = [(cid, float(scores[self._pos_by_id[cid]])) for cid in chunk_ids if cid in self._pos_by_id]
         scored.sort(key=lambda x: x[1], reverse=True)
         return [cid for cid, _ in scored[: SETTINGS.top_k]]
 
-    def _merge_with_doc_floor(self, chunk_ids: list[str], dense: np.ndarray) -> list[tuple[str, float]]:
+    def _merge_with_doc_floor(self, chunk_ids: list[str], scores: np.ndarray) -> list[tuple[str, float]]:
         """Final cross-location merge, with a per-document floor. A flat global
         top_k cut over every navigated document's candidates let one document's
-        higher raw dense scores fully starve another — measured directly: of
-        multi-hop cases where both gold documents were correctly navigated, over
-        half still had one document's chunks completely zeroed out of the final
-        top_k. Reserve floor = max(1, top_k // n_docs) slots per document (best
-        chunks first, by the same dense score), then fill any remaining slots by
-        global rank over what's left. structure still decided the candidate
-        pool; this only changes how the top_k budget is split across it."""
+        higher raw scores fully starve another: of multi-hop cases where both gold
+        documents were correctly navigated, over half still had one document's
+        chunks zeroed out of the final top_k. Reserve floor = max(1, top_k // n_docs)
+        slots per document (best chunks first, by the same score), then fill any
+        remaining slots by global rank over what's left. Structure still decided the
+        candidate pool; this only changes how the top_k budget is split across it."""
         by_doc: dict[str, list[tuple[str, float]]] = {}
         for cid in chunk_ids:
             if cid not in self._pos_by_id:
                 continue
             doc = self._chunk_by_id[cid].doc
-            by_doc.setdefault(doc, []).append((cid, float(dense[self._pos_by_id[cid]])))
+            by_doc.setdefault(doc, []).append((cid, float(scores[self._pos_by_id[cid]])))
         for scored in by_doc.values():
             scored.sort(key=lambda x: x[1], reverse=True)
 
@@ -226,12 +222,11 @@ class PageIndexRAG(Approach):
         if not docs:
             return self._hybrid_fallback(query, trace, "No document selected")
 
-        # Computed once up front: used both to cap each navigated location's own
-        # contribution (_navigate -> _top_chunks) and for the final cross-location
-        # ranking below — structure decides *where* to look, this decides *what
-        # from there* and *what order*.
+        # Fused BM25 + dense score, the same fusion hybrid search uses: caps each
+        # navigated location and orders the final merge. Dense-only trimming cut gold
+        # chunks that BM25 ranked in their section's top 5 (7 of 11 reached-but-cut cases).
         qvec = embed_one(query, role="query")
-        dense = self.index.dense_scores(qvec)
+        scores = self.index.hybrid_scores(query, qvec, SETTINGS.bm25_weight)
 
         gathered_ids: list[str] = []
         seen: set[str] = set()
@@ -239,7 +234,7 @@ class PageIndexRAG(Approach):
             tree = self._trees.get(doc)
             if tree is None:
                 continue
-            for cid in self._navigate(query, tree, tree.nodes[tree.root_id], trace, doc, dense):
+            for cid in self._navigate(query, tree, tree.nodes[tree.root_id], trace, doc, scores):
                 if cid not in seen:
                     seen.add(cid)
                     gathered_ids.append(cid)
@@ -247,7 +242,7 @@ class PageIndexRAG(Approach):
         if not gathered_ids:
             return self._hybrid_fallback(query, trace, "Tree navigation returned nothing")
 
-        top = self._merge_with_doc_floor(gathered_ids, dense)
+        top = self._merge_with_doc_floor(gathered_ids, scores)
         trace.append(TraceStep("Final ranking",
-                                f"{len(gathered_ids)} candidates from structure → top {len(top)} by similarity"))
+                                f"{len(gathered_ids)} candidates from structure → top {len(top)} by hybrid score"))
         return [RetrievedChunk(self._chunk_by_id[cid], s, "pageindex") for cid, s in top]
