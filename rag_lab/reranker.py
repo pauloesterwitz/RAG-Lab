@@ -4,6 +4,7 @@ pipeline always works even if a model download or arch fails on this box."""
 from __future__ import annotations
 
 import json
+import threading
 from typing import Optional
 
 from .config import SETTINGS
@@ -11,6 +12,9 @@ from .llamaswap_client import generate
 
 _BACKEND = None  # cached singleton
 _BACKEND_NAME = "uninitialized"
+# Eval runs call rerank() from a thread pool; without this, every thread that
+# arrives before the first load finishes loads its own model copy.
+_INIT_LOCK = threading.Lock()
 
 
 def backend_name() -> str:
@@ -90,9 +94,15 @@ class _LLMReranker:
 
 
 def _init_backend():
+    if _BACKEND is None:
+        with _INIT_LOCK:
+            if _BACKEND is None:
+                _load_backend()
+    return _BACKEND
+
+
+def _load_backend():
     global _BACKEND, _BACKEND_NAME
-    if _BACKEND is not None:
-        return _BACKEND
     # 1) Jina (requested)
     try:
         _BACKEND = _JinaReranker(SETTINGS.reranker_model)
