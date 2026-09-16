@@ -386,6 +386,50 @@ Bold = best in column.
 | GraphRAG | 0.821 | 0.844 | 0.799 | 0.89 |
 | PageIndex | 0.651 | 0.691 | 0.61 | 0.5 |
 
+---
+
+### Round 2: embedding task prefixes + PageIndex rework (local, 2026-09-16)
+
+**Configuration:** 100 goldens · judge/gen `qwen38fn-sglang-tp2-starfleet` · embeddings
+`nomic-embed-text-kathryn` (768-d) now sent with the `search_query:` / `search_document:`
+task prefixes its model card requires · PageIndex trees rebuilt 2026-09-16.
+
+| Approach | Composite | Single-hop | Multi-hop | Gold-chunk hit | Avg latency |
+|---|---|---|---|---|---|
+| RAG + Reranker | **0.840** | 0.852 | **0.828** | **0.94** | 40.2 s |
+| Corrective RAG (CRAG) | 0.827 | 0.843 | 0.812 | 0.92 | 25.7 s |
+| HyDE | 0.826 | 0.848 | 0.805 | 0.89 | 19.4 s |
+| Plain RAG | 0.824 | 0.841 | 0.808 | 0.90 | 17.2 s |
+| Agentic RAG | 0.822 | 0.838 | 0.807 | 0.90 | 28.1 s |
+| GraphRAG | 0.821 | 0.836 | 0.806 | 0.90 | 19.2 s |
+| PageIndex | 0.680 | 0.725 | 0.635 | 0.57 | 60.6 s |
+
+PageIndex Hybrid is still being judged; its row follows when the run finishes.
+
+**Retrieval only** (`scripts/retrieval_eval.py`, gold chunks found out of 100, no answer
+generation): RAG + Reranker 94, Plain RAG 91, Agentic RAG 90, GraphRAG 90, Corrective RAG 89,
+HyDE 88, PageIndex Hybrid 70, PageIndex 59. A value-only control (PageIndex Hybrid with
+`use_tree = False`: the same model-selected documents, no tree candidates) finds 78.
+
+### Round 2 findings
+
+1. **Task prefixes lift retrieval, not answers.** Every approach gained 1 to 3 points of
+   gold-chunk hit rate (reranker 91 to 94%), while composites moved within ±0.011. These
+   pipelines already retrieved enough context for most questions.
+2. **PageIndex improved but stays last**: 0.651 to 0.680 composite, 50 to 57% gold-chunk hit.
+   Kept: trimming and merging by a fused BM25 + dense score, and keeping the best-scoring
+   subsections instead of the first two. Reverted after measurement: two changes that reduced
+   document fan-out and starved multi-hop questions of their second document.
+3. **Tree navigation is a net negative on this corpus.** The value-only control finds 78 gold
+   chunks against 59 for tree navigation and 70 for the rank-fusion hybrid, and candidates only
+   the tree surfaced supplied a single gold chunk. Restricting search to the model-selected
+   documents already costs 13 hits against corpus-wide hybrid search (91).
+4. **Better trees did not help.** After rebuilding (Agentic Design Patterns' root cut from 99 to
+   41 children, two unusable tables of contents replaced by the heading heuristic, leaf summaries
+   anchored at their own headings): 59 / 70 / 78, against 60 / 70 / 77 before.
+5. **Method.** `--llm-cache` replays identical model calls across runs, so a paired A/B isolates
+   the code change: two identical PageIndex runs otherwise flip about 11 of 100 cases.
+
 ## Web App
 
 A Vue 3 single-page application served directly by the FastAPI backend.
