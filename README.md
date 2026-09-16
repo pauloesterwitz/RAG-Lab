@@ -402,9 +402,8 @@ task prefixes its model card requires · PageIndex trees rebuilt 2026-09-16.
 | Plain RAG | 0.824 | 0.841 | 0.808 | 0.90 | 17.2 s |
 | Agentic RAG | 0.822 | 0.838 | 0.807 | 0.90 | 28.1 s |
 | GraphRAG | 0.821 | 0.836 | 0.806 | 0.90 | 19.2 s |
+| PageIndex Hybrid | 0.706 | 0.737 | 0.674 | 0.66 | 42.0 s |
 | PageIndex | 0.680 | 0.725 | 0.635 | 0.57 | 60.6 s |
-
-PageIndex Hybrid is still being judged; its row follows when the run finishes.
 
 **Retrieval only** (`scripts/retrieval_eval.py`, gold chunks found out of 100, no answer
 generation): RAG + Reranker 94, Plain RAG 91, Agentic RAG 90, GraphRAG 90, Corrective RAG 89,
