@@ -23,6 +23,9 @@ VARIANTS = {
     "prior": variants.TreePriorPageIndex,
     "beam": variants.BeamPageIndex,
     "suff": variants.SufficiencyReentryPageIndex,
+    "route": variants.ScoreRoutedPageIndex,
+    "evidence": variants.EvidenceNavPageIndex,
+    "fine": variants.FineGrainPageIndex,
 }
 
 

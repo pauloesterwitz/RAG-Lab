@@ -289,3 +289,150 @@ class SufficiencyReentryPageIndex(_PickAllPageIndex):
         if not gathered:
             return self._hybrid_fallback(query, trace, "Tree navigation returned nothing")
         return self._final_ranking(docs, gathered, scores, trace)
+
+
+class ScoreRoutedPageIndex(PageIndexRAG):
+    """Option 1: pick the documents by their best chunk's fused score instead of asking
+    the model. Routing is where the remaining loss sits: restricting search to the
+    model's documents costs 13 hits against corpus-wide search, 6 misses never open the
+    gold document, and on 13 questions the model names no document at all. This removes
+    the reasoning step at the document level, so it answers whether that step earns its
+    keep rather than being a better PageIndex."""
+
+    def __init__(self, index):
+        super().__init__(index)
+        by_doc: dict[str, list[int]] = {}
+        for i, c in enumerate(index.chunks):
+            by_doc.setdefault(c.doc, []).append(i)
+        self._doc_pos = {doc: np.array(pos) for doc, pos in by_doc.items()}
+
+    def retrieve(self, query: str, trace: list[TraceStep]) -> list[RetrievedChunk]:
+        if not self._trees:
+            return self._hybrid_fallback(query, trace, "PageIndex unavailable")
+        qvec = embed_one(query, role="query")
+        scores = self.index.hybrid_scores(query, qvec, SETTINGS.bm25_weight)
+
+        ranked = sorted(
+            ((doc, float(scores[self._doc_pos[doc]].max())) for doc in self._trees if doc in self._doc_pos),
+            key=lambda x: x[1], reverse=True,
+        )
+        docs = [doc for doc, _ in ranked[: SETTINGS.pageindex_max_docs]]
+        if not docs:
+            return self._hybrid_fallback(query, trace, "No document selected")
+        # Not labelled "Root selection": no model call happens here, and the harness
+        # counts that label as one.
+        trace.append(TraceStep("Document routing", "by best chunk score: " + ", ".join(docs)))
+
+        gathered: list[str] = []
+        seen: set[str] = set()
+        for doc in docs:
+            tree = self._trees.get(doc)
+            if tree is None:
+                continue
+            for cid in self._navigate(query, tree, tree.nodes[tree.root_id], trace, doc, scores):
+                if cid not in seen:
+                    seen.add(cid)
+                    gathered.append(cid)
+        if not gathered:
+            return self._hybrid_fallback(query, trace, "Tree navigation returned nothing")
+        return self._final_ranking(docs, gathered, scores, trace)
+
+
+class EvidenceNavPageIndex(PageIndexRAG):
+    """Option 2: show the model each candidate section's best-scoring sentence instead of
+    only its title and summary. A summary compresses thousands of characters into two or
+    three sentences and drops the rare token the question turns on; this puts that signal
+    back in front of the decision."""
+
+    snippet_chars = 160
+
+    def _best_snippet(self, node, scores: np.ndarray) -> str:
+        best, best_id = float("-inf"), None
+        for cid in node.chunk_ids:
+            i = self._pos_by_id.get(cid)
+            if i is not None and scores[i] > best:
+                best, best_id = float(scores[i]), cid
+        if best_id is None:
+            return node.summary[:self.snippet_chars]
+        return " ".join(self._chunk_by_id[best_id].text.split())[: self.snippet_chars]
+
+    def _choose_children(self, query: str, tree, node, trace: list[TraceStep], doc: str,
+                         scores: np.ndarray) -> list[str]:
+        options = "\n".join(
+            f'- id="{cid}" "{tree.nodes[cid].title}" (p.{tree.nodes[cid].page_start}-'
+            f'{tree.nodes[cid].page_end}): {self._best_snippet(tree.nodes[cid], scores)}'
+            for cid in node.children
+        )
+        prompt = (
+            f'You are navigating the structure of "{doc}" to answer a question, the way a reader '
+            "flips to the right section using a table of contents. Each subsection is shown with "
+            "its most relevant sentence.\n\n"
+            f'Current section: "{node.title}" — {node.summary[:200]}\n\nSubsections:\n{options}\n\n'
+            f"Question: {query}\n\n"
+            "For EACH subsection, judge whether it's worth descending into to answer the question, "
+            "or say this section itself already answers it (stop_here=true, selected=[]). Reply JSON: "
+            '{"selected": ["<id>", ...], "stop_here": true|false}'
+        )
+        try:
+            budget = max(600, 100 * len(node.children) + 200)
+            data = json.loads(generate(prompt, model=SETTINGS.pageindex_model, fmt=_DESCEND_SCHEMA,
+                                       num_predict=budget, temperature=0.0))
+            picked = [cid for cid in data.get("selected", []) if cid in tree.nodes]
+            stop_here = bool(data.get("stop_here", False)) or not picked
+        except Exception:
+            trace.append(TraceStep(f"[{doc}] Descend failed: {node.title}", "call or parse failed"))
+            return []
+        if stop_here:
+            trace.append(TraceStep(f"[{doc}] Stopped at: {node.title}", f"p.{node.page_start}-{node.page_end}"))
+            return []
+        picked.sort(key=lambda cid: self._node_best(tree.nodes[cid], scores), reverse=True)
+        selected = picked[: SETTINGS.pageindex_max_breadth]
+        trace.append(TraceStep(f"[{doc}] Descend from: {node.title}",
+                                f"model picked {len(picked)}, kept: " + ", ".join(tree.nodes[c].title for c in selected)))
+        return selected
+
+
+class FineGrainPageIndex(PageIndexRAG):
+    """Option 3: split every stopping node into one child per chunk, in memory, so the
+    model can land on something the size of an answer instead of a whole chapter. The
+    31 wrong-section misses are a granularity mismatch: a "leaf" here can be a chapter.
+    Chunk nodes carry their own opening text as the summary, so this needs no rebuild
+    and no extra build-time model calls."""
+
+    def __init__(self, index):
+        super().__init__(index)
+        from ..pageindex_build import PITreeNode
+
+        for tree in self._trees.values():
+            for node in list(tree.nodes.values()):
+                if node.children or len(node.chunk_ids) < 2:
+                    continue
+                for j, cid in enumerate(node.chunk_ids):
+                    chunk = self._chunk_by_id.get(cid)
+                    if chunk is None:
+                        continue
+                    child = PITreeNode(
+                        id=f"{node.id}::c{j}",
+                        title=f"{node.title} (p.{chunk.page_start})",
+                        page_start=chunk.page_start, page_end=chunk.page_end,
+                        level=node.level + 1,
+                        summary=" ".join(chunk.text.split())[:200],
+                        children=[], chunk_ids=[cid],
+                    )
+                    tree.nodes[child.id] = child
+                    node.children.append(child.id)
+
+    def _navigate(self, query: str, tree, node, trace: list[TraceStep], doc: str,
+                  scores: np.ndarray, depth: int = 0) -> list[str]:
+        # One level deeper than the base class: the chunk nodes added above sit below
+        # what used to be the leaves.
+        if not node.children or depth >= SETTINGS.pageindex_max_depth + 1:
+            trace.append(TraceStep(f"[{doc}] Leaf: {node.title}", f"p.{node.page_start}-{node.page_end}"))
+            return self._top_chunks(node.chunk_ids, scores)
+        selected = self._choose_children(query, tree, node, trace, doc, scores)
+        if not selected:
+            return self._top_chunks(node.chunk_ids, scores)
+        gathered: list[str] = []
+        for cid in selected:
+            gathered.extend(self._navigate(query, tree, tree.nodes[cid], trace, doc, scores, depth + 1))
+        return gathered
