@@ -299,6 +299,8 @@ class ScoreRoutedPageIndex(PageIndexRAG):
     the reasoning step at the document level, so it answers whether that step earns its
     keep rather than being a better PageIndex."""
 
+    max_docs = None  # None = SETTINGS.pageindex_max_docs
+
     def __init__(self, index):
         super().__init__(index)
         by_doc: dict[str, list[int]] = {}
@@ -316,7 +318,7 @@ class ScoreRoutedPageIndex(PageIndexRAG):
             ((doc, float(scores[self._doc_pos[doc]].max())) for doc in self._trees if doc in self._doc_pos),
             key=lambda x: x[1], reverse=True,
         )
-        docs = [doc for doc, _ in ranked[: SETTINGS.pageindex_max_docs]]
+        docs = [doc for doc, _ in ranked[: self.max_docs or SETTINGS.pageindex_max_docs]]
         if not docs:
             return self._hybrid_fallback(query, trace, "No document selected")
         # Not labelled "Root selection": no model call happens here, and the harness
@@ -336,6 +338,28 @@ class ScoreRoutedPageIndex(PageIndexRAG):
         if not gathered:
             return self._hybrid_fallback(query, trace, "Tree navigation returned nothing")
         return self._final_ranking(docs, gathered, scores, trace)
+
+
+class ScoreRoutedTop2PageIndex(ScoreRoutedPageIndex):
+    """Option 1a: the same score routing over two documents instead of three. Routing to
+    three opened both gold documents on 35 multi-hop questions, but spread the five-chunk
+    budget so thin that the share of chunks from gold documents fell from 0.73 to 0.59."""
+
+    max_docs = 2
+
+
+class ScoreRoutedNoFloorPageIndex(ScoreRoutedPageIndex):
+    """Option 1b: the same score routing with no per-document floor, so the final five go
+    to the best-scoring candidates wherever they sit. This separates the two causes of the
+    dilution: the floor is also what produced the jump to 35, so it should cost multi-hop
+    coverage back."""
+
+    def _merge_with_doc_floor(self, chunk_ids: list[str], scores: np.ndarray) -> list[tuple[str, float]]:
+        scored = sorted(
+            ((cid, float(scores[self._pos_by_id[cid]])) for cid in chunk_ids if cid in self._pos_by_id),
+            key=lambda x: x[1], reverse=True,
+        )
+        return scored[: SETTINGS.top_k]
 
 
 class EvidenceNavPageIndex(PageIndexRAG):

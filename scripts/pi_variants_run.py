@@ -24,6 +24,8 @@ VARIANTS = {
     "beam": variants.BeamPageIndex,
     "suff": variants.SufficiencyReentryPageIndex,
     "route": variants.ScoreRoutedPageIndex,
+    "route2": variants.ScoreRoutedTop2PageIndex,
+    "routeflat": variants.ScoreRoutedNoFloorPageIndex,
     "evidence": variants.EvidenceNavPageIndex,
     "fine": variants.FineGrainPageIndex,
 }
