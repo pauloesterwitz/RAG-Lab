@@ -429,6 +429,36 @@ HyDE 88, PageIndex Hybrid 70, PageIndex 59. A value-only control (PageIndex Hybr
 5. **Method.** `--llm-cache` replays identical model calls across runs, so a paired A/B isolates
    the code change: two identical PageIndex runs otherwise flip about 11 of 100 cases.
 
+### Round 3: does iterating the tree help? (2026-09-16)
+
+Four navigation strategies on the same trees and the same 100 questions, with model calls
+replayed across runs so each difference is the code and not sampling noise. Gold chunks found
+out of 100, retrieval only:
+
+| Navigation | Found | Model calls per query |
+|---|---|---|
+| Greedy descent (2 sections per hop, no backtracking) | 59 | 3.7 |
+| Document cap raised from 3 to 5 | 60 | 4.0 |
+| Whole tree in one call (upstream's documented prompt shape) | 65 | 2.5 |
+| Beam search with backtracking | 54 | 3.9 |
+| Navigate, grade, re-enter rejected branches | 59 | 5.0 |
+| **Tree as a re-ranking prior** (nothing excluded) | **89** | 2.5 |
+| *Reference: same selected documents, no tree* | *78* | *3.7* |
+| *Reference: plain hybrid over the whole corpus* | *91* | *0* |
+
+1. **Iterating does not help.** Re-entering the tree after a sufficiency check fired on 16 of
+   100 questions and changed no result (net zero flips) for 35% more model calls. Best-first
+   beam search with backtracking scored *below* the greedy descent it replaced.
+2. **Looking at the whole tree at once is the one navigation win**: +6 hits at fewer calls than
+   descending hop by hop, which is also the prompt shape upstream documents. It still lands 13
+   hits below simply searching those same documents without a tree.
+3. **Every configuration that lets the tree exclude candidates lands below the no-tree control
+   (78).** The only configuration that never excludes, adding a bonus to chunks in chosen
+   sections over corpus-wide candidates, reaches 89, still short of plain hybrid at 91.
+4. So on this corpus the tree can neither usefully exclude nor usefully re-rank. That was the
+   kill criterion agreed before running, so tree work stops here and PageIndex stays as the
+   lab's structural baseline.
+
 ## Web App
 
 A Vue 3 single-page application served directly by the FastAPI backend.
