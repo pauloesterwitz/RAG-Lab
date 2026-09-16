@@ -459,6 +459,34 @@ out of 100, retrieval only:
    kill criterion agreed before running, so tree work stops here and PageIndex stays as the
    lab's structural baseline.
 
+### Round 3b: what actually helped (2026-09-16)
+
+Three further changes, each measured on retrieval first and then judged end to end:
+
+| Change | Gold chunks /100 | Composite | Gold-chunk hit | Latency |
+|---|---|---|---|---|
+| PageIndex baseline | 59 | 0.680 | 57% | 60.6 s |
+| **Evidence-augmented navigation** | **70** | **0.742** | **68%** | **43.6 s** |
+| Score-based document routing | 57 | 0.692 | 57% | 58.4 s |
+| Fine-grained trees (516 to 2,710 nodes) | 46 | 0.662 | 44% | 56.6 s |
+| *PageIndex Hybrid, for reference* | *70* | *0.706* | *66%* | *42.0 s* |
+| *Plain hybrid, for reference* | *91* | *0.824* | *90%* | *17.2 s* |
+
+1. **Showing the model each candidate section's best-scoring sentence is the one real
+   improvement to the method.** It adds 0.062 composite and 11 points of gold-chunk hit, and
+   runs *faster* than the baseline because navigation stops sooner. It also beats the
+   tree-plus-value hybrid without doing any value search. A node summary compresses thousands
+   of characters into two or three sentences and drops the rare token the question turns on;
+   the sentence puts that signal back in front of the decision.
+2. **Score-based document routing fixes coverage, not retrieval.** Ranking documents by their
+   best chunk's score never fails to pick one (13 fallbacks drop to 0) and opens both gold
+   documents on 35 multi-hop questions against 14 for the model's own choice, better even than
+   plain hybrid's 12. That converts into 0.029 multi-hop composite and little else: chunk hits
+   stay at 57 to 58 at every budget tried (two documents, three documents, with and without the
+   per-document floor).
+3. **Finer trees make it worse.** Splitting sections into one node per chunk drops retrieval to
+   46 and the composite to 0.662: the model chooses worse among many near-identical snippets.
+
 ## Web App
 
 A Vue 3 single-page application served directly by the FastAPI backend.
