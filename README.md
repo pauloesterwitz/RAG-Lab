@@ -5,6 +5,10 @@ evaluates them end-to-end with **DeepEval**, and ships a **Vue** web app to
 re-embed, chat with any approach (retrieved chunks always quoted), and compare
 results on an interactive dashboard.
 
+**Write-up:** [PageIndex Reality Check](https://oesterwitz-consulting.de/#/blog/pageindex-reality-check)
+walks through the PageIndex experiments in this repo: where structure-first retrieval loses,
+which of its two mechanisms costs what, and the one change that actually helped.
+
 Supports two LLM providers, switchable via environment variable:
 
 | Provider | Generation & Judging | Embeddings |
